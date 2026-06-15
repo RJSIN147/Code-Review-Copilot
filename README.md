@@ -160,7 +160,7 @@ Ensure you have the following installed on your system:
 
 ```bash
 # Clone the repository
-git clone https://github.com/zingzy/code-review-agent.git
+git clone https://github.com/RJSIN147/Code-Review-Copilot
 cd code-review-agent
 
 # Install all dependencies with UV
