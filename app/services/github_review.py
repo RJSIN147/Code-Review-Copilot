@@ -19,19 +19,22 @@ from app.utils.logger import logger
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class InlineComment:
     """A single inline comment to post on a specific file line."""
-    path: str           # File path relative to repo root, e.g. "app/main.py"
-    line: int           # 1-indexed line number in the new version of the file
-    body: str           # Markdown comment body
+
+    path: str  # File path relative to repo root, e.g. "app/main.py"
+    line: int  # 1-indexed line number in the new version of the file
+    body: str  # Markdown comment body
 
 
 @dataclass
 class PRReview:
     """A complete PR review: top-level body + zero or more inline comments."""
-    body: str                                  # Top-of-PR summary markdown
-    event: str                                 # COMMENT | REQUEST_CHANGES | APPROVE
+
+    body: str  # Top-of-PR summary markdown
+    event: str  # COMMENT | REQUEST_CHANGES | APPROVE
     comments: list[InlineComment] = field(default_factory=list)
 
 
@@ -41,9 +44,9 @@ class PRReview:
 
 SEVERITY_EMOJI = {
     "critical": "🔴",
-    "high":     "🟠",
-    "medium":   "🟡",
-    "low":      "🔵",
+    "high": "🟠",
+    "medium": "🟡",
+    "low": "🔵",
 }
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -52,6 +55,7 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class GitHubReviewService:
     """
@@ -112,7 +116,7 @@ class GitHubReviewService:
         summary_dict: dict = analysis_results.get("summary", {})
 
         inline_comments: list[InlineComment] = []
-        skipped_issues: list[dict] = []   # issues whose lines aren't in the diff
+        skipped_issues: list[dict] = []  # issues whose lines aren't in the diff
 
         for file_path, file_data in files_dict.items():
             issues: list[dict] = file_data.get("issues", [])
@@ -196,7 +200,11 @@ class GitHubReviewService:
             response = client.post(url, headers=self._headers, json=payload)
 
             # Handle case where user runs analysis on their own PR
-            if response.status_code == 422 and "Review Can not request changes on your own pull request" in response.text:
+            if (
+                response.status_code == 422
+                and "Review Can not request changes on your own pull request"
+                in response.text
+            ):
                 logger.warning(
                     f"Cannot request changes on own pull request for PR #{pr_number}. "
                     "Retrying review posting with event=COMMENT instead."
@@ -211,9 +219,7 @@ class GitHubReviewService:
             response.raise_for_status()
 
         result = response.json()
-        logger.info(
-            f"Review posted successfully. GitHub review ID: {result.get('id')}"
-        )
+        logger.info(f"Review posted successfully. GitHub review ID: {result.get('id')}")
         return result
 
     # ------------------------------------------------------------------
