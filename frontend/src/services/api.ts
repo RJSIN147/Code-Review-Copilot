@@ -1,10 +1,10 @@
 /**
  * Typed fetch client for the Code Review Copilot backend.
  *
- * All requests are prefixed with `/api/v1` and go through the `apiFetch`
+ * All requests are prefixed with `API_BASE_URL` and go through the `apiFetch`
  * wrapper. In dev, Vite proxies `/api` to the backend at
- * `http://localhost:8000`. In production, the same prefix is expected to
- * be served behind the same origin.
+ * `http://localhost:8000`. In production, set `VITE_API_BASE_URL` to the
+ * deployed backend origin (e.g. `https://code-review.spoo.me/api/v1`).
  */
 
 import type {
@@ -18,7 +18,7 @@ import type {
   TaskStatusResponse,
 } from "../types/api";
 
-const API_PREFIX = "/api/v1";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
 /**
  * Thrown for any non-2xx response from the backend. Carries the HTTP
@@ -45,7 +45,7 @@ interface ApiFetchOptions {
 }
 
 function buildUrl(path: string, query?: ApiFetchOptions["query"]): string {
-  const base = path.startsWith(API_PREFIX) ? path : `${API_PREFIX}${path}`;
+  const base = path.startsWith(API_BASE_URL) ? path : `${API_BASE_URL}${path}`;
   if (!query) return base;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
