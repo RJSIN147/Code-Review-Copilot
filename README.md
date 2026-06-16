@@ -72,6 +72,29 @@ graph TB
     class PostgreSQL,Redis storage
     class GitHub,OpenAI external
 ```
+## 🎯 Why This Architecture?
+
+The Code Reviewer Agent is designed to handle pull requests of varying sizes while maintaining responsiveness and scalability.
+
+### Key Benefits
+
+- **Non-blocking Analysis**: PR reviews run asynchronously through Celery workers, preventing long-running requests from impacting API responsiveness.
+- **Scalable Processing**: Multiple workers can analyze different pull requests concurrently.
+- **Intelligent File Prioritization**: The AI triage stage focuses attention on high-impact files first, reducing analysis costs and improving review quality.
+- **Persistent Results**: Analysis reports are stored in PostgreSQL, allowing users to retrieve results even after task completion.
+- **Fault Tolerance**: Redis-backed queues ensure tasks can be retried and recovered if a worker fails.
+- **Provider Flexibility**: The architecture supports multiple LLM providers, reducing vendor lock-in and improving reliability.
+- **Extensible Workflow**: New analysis tools, detectors, and review stages can be added to the LangGraph workflow with minimal changes to the existing system.
+
+### Typical Analysis Lifecycle
+
+1. User submits a Pull Request URL and PR number.
+2. FastAPI validates the request and queues a background task.
+3. Celery workers fetch PR metadata and changed files from GitHub.
+4. LangGraph determines an analysis strategy.
+5. AI agents review files and identify issues.
+6. Findings are aggregated into a final report.
+7. Results are stored and made available through the API.
 
 ## 🤖 AI Agent Workflow
 
