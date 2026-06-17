@@ -5,7 +5,7 @@ Modern AI agent that makes intelligent decisions about code analysis
 using LangGraph workflow and specialized Python analysis tools.
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 from app.agents.ai_workflow import AIWorkflow
 from app.utils.logger import logger
 
@@ -26,7 +26,10 @@ class LangGraphAnalyzer:
         logger.info("AI-driven analyzer initialized")
 
     async def analyze_pr(
-        self, pr_data: Dict[str, Any], files_data: List[Dict[str, Any]]
+        self,
+        pr_data: Dict[str, Any],
+        files_data: List[Dict[str, Any]],
+        progress_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Analyze a pull request using, AI-driven workflow.
@@ -34,6 +37,8 @@ class LangGraphAnalyzer:
         Args:
             pr_data: Pull request metadata from GitHub.
             files_data: List of changed files with content and metadata.
+            progress_callback: Optional async callable invoked as each file
+                finishes: ``await progress_callback(completed, total, file_path)``.
 
         Returns:
             A dictionary containing the analysis results.
@@ -44,7 +49,9 @@ class LangGraphAnalyzer:
 
         try:
             # The workflow will handle file filtering internally
-            results = await self.workflow.run(pr_data, files_data)
+            results = await self.workflow.run(
+                pr_data, files_data, progress_callback=progress_callback
+            )
 
             logger.info(
                 f"AI analysis completed for PR: {pr_data.get('title', 'Unknown')}"

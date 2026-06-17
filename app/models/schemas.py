@@ -62,6 +62,7 @@ class TaskStatusResponse(BaseModel):
     task_id: UUID
     status: TaskStatus
     progress: float = Field(..., ge=0.0, le=100.0)
+    status_message: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

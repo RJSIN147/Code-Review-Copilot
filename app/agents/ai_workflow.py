@@ -36,6 +36,9 @@ class AIAnalysisState(TypedDict):
     analysis_results: List[FileAnalysis]
     final_summary: Dict[str, Any]
     llm_service: LLMService
+    # Optional async callback invoked as each file finishes:
+    # await progress_callback(completed: int, total: int, file_path: str)
+    progress_callback: Optional[Any]
 
 
 class AIWorkflow:
@@ -68,10 +71,16 @@ class AIWorkflow:
         return workflow.compile()
 
     async def run(
-        self, pr_data: Dict[str, Any], files_data: List[Dict[str, Any]]
+        self,
+        pr_data: Dict[str, Any],
+        files_data: List[Dict[str, Any]],
+        progress_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Run the intelligent analysis workflow.
+
+        ``progress_callback`` is an optional async callable invoked as each file
+        finishes analysis: ``await progress_callback(completed, total, file_path)``.
         """
         llm_service = LLMService()
 
@@ -83,6 +92,7 @@ class AIWorkflow:
             "analysis_results": [],
             "final_summary": {},
             "llm_service": llm_service,
+            "progress_callback": progress_callback,
         }
         final_state = await self.graph.ainvoke(initial_state)
         return self._format_output(final_state)
@@ -135,10 +145,14 @@ class AIWorkflow:
 
         files_by_path = {f.get("filename"): f for f in state["files_data"]}
         llm_service = state["llm_service"]
+        progress_callback = state.get("progress_callback")
 
         settings = get_settings()
         max_concurrency = max(1, settings.agent.max_concurrent_analyses)
         semaphore = asyncio.Semaphore(max_concurrency)
+
+        total = len(critical_files)
+        completed = 0
 
         async def analyze_one(file_path: str) -> Optional[FileAnalysis]:
             file_data = files_by_path.get(file_path)
@@ -155,12 +169,25 @@ class AIWorkflow:
                 )
             return {"file_path": file_path, "issues": issues}
 
+        async def analyze_and_report(file_path: str) -> Optional[FileAnalysis]:
+            nonlocal completed
+            try:
+                return await analyze_one(file_path)
+            finally:
+                # Report progress on completion regardless of success/failure so
+                # the percentage tracks files processed, not just files that pass.
+                completed += 1
+                if progress_callback is not None:
+                    try:
+                        await progress_callback(completed, total, file_path)
+                    except Exception as cb_error:
+                        logger.warning(f"Progress callback failed: {cb_error}")
+
         logger.info(
-            f"Analyzing {len(critical_files)} files concurrently "
-            f"(max {max_concurrency} at a time)."
+            f"Analyzing {total} files concurrently (max {max_concurrency} at a time)."
         )
         results = await asyncio.gather(
-            *(analyze_one(file_path) for file_path in critical_files),
+            *(analyze_and_report(file_path) for file_path in critical_files),
             return_exceptions=True,
         )
 

@@ -69,6 +69,7 @@ class AnalysisTask(SQLModel, table=True):
         ),
     )
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
+    status_message: Optional[str] = Field(default=None, max_length=500)
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(), index=True)
