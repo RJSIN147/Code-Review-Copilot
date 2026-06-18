@@ -32,11 +32,12 @@ timeout = 30
 max_retries = 3
 max_files_per_pr = 50
 max_file_size_kb = 1024  # 1MB
+post_comments = true
 
 [llm]
 provider = "openai"
-base_url = "https://text.pollinations.ai/openai"
-model = "openai"
+base_url = "https://openrouter.ai/api/v1"
+model = "openai/gpt-oss-120b:free"
 openai_api_key = "$OPENAI_API_KEY"
 
 

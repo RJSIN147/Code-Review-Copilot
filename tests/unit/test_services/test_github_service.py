@@ -20,6 +20,7 @@ class TestGitHubService:
         assert service._token == "test_token"
         assert service.is_authenticated is True
 
+    @patch.dict("os.environ", {"GITHUB_TOKEN": ""})
     def test_init_without_token(self):
         """Test GitHub service initialization without token."""
         service = GitHubService()

@@ -12,6 +12,8 @@ import os
 
 from app.tasks.celery_app import celery
 from app.services.github import GitHubService
+from app.services.github_review import GitHubReviewService
+from app.config.settings import get_settings
 from app.utils.language_detection import LanguageDetector
 from app.config.database import get_database_manager
 from app.agents.analyzer import LangGraphAnalyzer
@@ -188,6 +190,7 @@ def analyze_pr_task(
     task_uuid = UUID(task_id)
 
     try:
+        settings = get_settings()
         logger.info(f"Starting analysis for PR #{pr_number} from {repo_url}")
 
         # Update task status to processing
@@ -344,6 +347,7 @@ def analyze_pr_task(
                         "additions": file_info.get("additions", 0),
                         "deletions": file_info.get("deletions", 0),
                         "changes": file_info.get("changes", 0),
+                        "patch": file_info.get("patch", ""),
                     }
                 )
                 analyzed_count += 1
@@ -417,6 +421,36 @@ def analyze_pr_task(
         run_async_in_celery(
             save_analysis_results(task_uuid, database_results, pr_metadata)
         )
+        if settings.github.post_comments and github_token:
+            try:
+                logger.info(
+                    f"GitHub comment posting is enabled — building review for PR #{pr_number}"
+                )
+                review_service = GitHubReviewService(github_token=github_token)
+                review = review_service.build_review(
+                    analysis_results=analysis_results,
+                    files_for_analysis=files_for_analysis,
+                    pr_metadata=pr_metadata,
+                )
+                review_service.post_review(
+                    repo_url=repo_url,
+                    pr_number=pr_number,
+                    review=review,
+                )
+                logger.info(
+                    f"Successfully posted review to PR #{pr_number} "
+                    f"with {len(review.comments)} inline comments"
+                )
+            except Exception as review_error:
+                logger.error(
+                    f"Failed to post GitHub review for PR #{pr_number}: {review_error}",
+                    exc_info=True,
+                )
+        elif settings.github.post_comments and not github_token:
+            logger.warning(
+                "post_comments is enabled in config but no github_token was provided "
+                "in the request — skipping comment posting."
+            )
 
         # Mark task as completed
         run_async_in_celery(

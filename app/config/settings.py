@@ -63,6 +63,7 @@ class GitHubConfig(BaseModel):
     max_retries: int = 3
     max_files_per_pr: int = 50
     max_file_size_kb: int = 1024
+    post_comments: bool = False
 
 
 class LLMConfig(BaseModel):

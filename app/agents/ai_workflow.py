@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.agents.tools.ai_tools import analyze_code_with_ai
+from app.config.settings import get_settings
 from app.services.llm_service import LLMService
+from app.utils.language_detection import LanguageDetector
 from app.utils.logger import logger
 
 
@@ -93,14 +95,31 @@ class AIWorkflow:
     async def triage_pr_node(self, state: AIAnalysisState) -> AIAnalysisState:
         """
         AI agent examines the PR to identify critical files for review.
+
+        Uses the configured analysis_languages from settings and the
+        LanguageDetector extension map to decide which files to analyze.
         """
-        # This is where the AI would decide which files to prioritize.
-        # For now, we'll select all Python files.
-        state["critical_files"] = [
-            f["filename"]
-            for f in state["files_data"]
-            if f.get("filename", "").endswith(".py")
-        ]
+        settings = get_settings()
+        configured_languages = {
+            lang.lower() for lang in settings.agent.analysis_languages
+        }
+
+        supported_extensions: set[str] = set()
+        for ext, lang in LanguageDetector.EXTENSION_MAP.items():
+            if lang.lower() in configured_languages:
+                supported_extensions.add(ext)
+
+        state["critical_files"] = []
+        for f in state["files_data"]:
+            filename = f.get("filename", "")
+            ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+            if ext in supported_extensions:
+                state["critical_files"].append(filename)
+            else:
+                detected = f.get("language", "")
+                if detected and detected.lower() in configured_languages:
+                    state["critical_files"].append(filename)
+
         logger.info(
             f"AI triage identified {len(state['critical_files'])} critical files."
         )

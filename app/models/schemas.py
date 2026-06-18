@@ -78,6 +78,7 @@ class IssueDetail(BaseModel):
     description: str = Field(..., min_length=1)
     suggestion: str = Field(..., min_length=1)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    production_impact: str = Field(default="")
 
 
 class FileAnalysisResponse(BaseModel):

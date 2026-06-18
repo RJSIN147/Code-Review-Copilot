@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.config.settings import get_settings
 from app.models.database import IssueType, IssueSeverity
 from app.utils.logger import logger
+from app.utils.language_detection import LanguageDetector
 
 
 # Pydantic models for structured output from LLM
@@ -26,6 +27,14 @@ class AIAnalysisIssue(BaseModel):
     line: int = Field(..., description="The line number where the issue occurs.")
     description: str = Field(..., description="A description of the issue.")
     suggestion: str = Field(..., description="A suggestion to fix the issue.")
+    production_impact: str = Field(
+        default="",
+        description=(
+            "A 1-2 sentence plain-English explanation of what could go wrong "
+            "in a live production system if this issue is not fixed. "
+            "Written for a junior developer with no assumed context."
+        ),
+    )
 
     @field_validator("type", mode="before")
     def validate_issue_type(cls, v):
@@ -75,6 +84,9 @@ class LLMService:
             )
         )
         self.model = self.settings.llm.model
+        logger.info(
+            f"LLM Service initialized with model: {self.model} (base_url: {self.settings.llm.base_url})"
+        )
 
     async def analyze_code(
         self, file_path: str, code_content: str, analysis_type: str
@@ -104,11 +116,17 @@ class LLMService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert code reviewer. Analyze the provided code and identify issues. Respond only with the structured JSON as requested.",
+                        "content": (
+                            "You are an expert code reviewer. Analyze the provided code and identify issues. "
+                            "Keep your reasoning extremely brief (under 100 words) before generating the final JSON response. "
+                            "For each issue, you MUST populate every single required field: 'type', 'severity', 'line', 'description', 'suggestion', and 'production_impact'."
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],
                 max_retries=2,
+                max_completion_tokens=4096,
+                temperature=0.0,
             )
 
             # Convert Pydantic models to dictionaries for consistent output
@@ -129,21 +147,28 @@ class LLMService:
         """
         Create a detailed prompt for the LLM.
         """
+        lang = LanguageDetector.detect_language_from_filename(file_path) or "code"
         return f"""
-        Analyze the following Python code from the file `{file_path}` for **{analysis_type.upper()}** issues.
+Analyze the following {lang} code from the file `{file_path}` for **{analysis_type.upper()}** issues.
 
-        **Code:**
-        ```python
-        {code_content}
-        ```
+**Code:**
+```{lang}
+{code_content}
+```
 
-        **Instructions:**
-        1.  Focus exclusively on identifying issues related to **{analysis_type}**.
-        2.  For each issue found, provide the line number, a clear description, a suggested fix, and a severity level.
-        3.  The `type` must be one of: {", ".join([e.value for e in IssueType])}.
-        4.  The `severity` must be one of: {", ".join([e.value for e in IssueSeverity])}.
-        5.  If no issues are found, return an empty list of issues.
-        """
+**Instructions:**
+1.  Focus on identifying issues related to **{analysis_type}**.
+2.  For each issue provide:
+    - `line`: the exact line number in the code above
+    - `type`: one of {", ".join([e.value for e in IssueType])}
+    - `severity`: one of {", ".join([e.value for e in IssueSeverity])}
+    - `description`: a concise description of the problem
+    - `suggestion`: a concrete, actionable fix
+    - `production_impact`: 1-2 sentences explaining what could go wrong in a live
+      production system if this is left unfixed. Write this for a junior developer
+      who does not yet know why the issue matters — no jargon, just consequences.
+3.  If no issues are found, return an empty list.
+"""
 
 
 __all__ = ["LLMService"]
