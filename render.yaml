@@ -16,7 +16,7 @@ services:
     name: code-review-web
     env: docker
     plan: free
-    releaseCommand: "uv run alembic upgrade head" # Automatically apply DB migrations on deploy
+    preDeployCommand: "uv run alembic upgrade head" # Automatically apply DB migrations on deploy
     envVars:
       - key: DATABASE_URL
         fromDatabase:
