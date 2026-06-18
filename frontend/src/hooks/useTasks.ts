@@ -34,7 +34,7 @@ export function useTasks(
 ): UseTasksResult {
   const { data, error, isLoading, mutate } = useSWR<TaskListResponse>(
     buildTasksKey(limit, offset, status_filter),
-    ([, paramsLimit, paramsOffset, paramsStatus]) =>
+    ([, paramsLimit, paramsOffset, paramsStatus]: TasksHookKey) =>
       listTasks({
         limit: paramsLimit,
         offset: paramsOffset,
