@@ -5,20 +5,20 @@ from app.utils.diff_parser import get_new_file_lines, is_line_in_diff, build_pat
 
 SIMPLE_PATCH = (
     "@@ -1,4 +1,6 @@\n"
-    " import os\n"            # context line  → new line 1
-    "+import json\n"          # added line    → new line 2
-    " \n"                     # context line  → new line 3
-    " def foo():\n"           # context line  → new line 4
-    "-    pass\n"             # removed line  → NOT in new file
-    "+    return 42\n"        # added line    → new line 5
-    "+\n"                     # added line    → new line 6
+    " import os\n"  # context line  → new line 1
+    "+import json\n"  # added line    → new line 2
+    " \n"  # context line  → new line 3
+    " def foo():\n"  # context line  → new line 4
+    "-    pass\n"  # removed line  → NOT in new file
+    "+    return 42\n"  # added line    → new line 5
+    "+\n"  # added line    → new line 6
 )
 
 ADDED_FILE_PATCH = (
     "@@ -0,0 +1,3 @@\n"
-    "+def hello():\n"         # new line 1
-    "+    return 'hi'\n"      # new line 2
-    "+\n"                     # new line 3
+    "+def hello():\n"  # new line 1
+    "+    return 'hi'\n"  # new line 2
+    "+\n"  # new line 3
 )
 
 
@@ -32,8 +32,8 @@ class TestGetNewFileLines:
         # Line that was "-    pass" should not appear
         # After removal, new file jumps from line 4 to lines 5 and 6
         # The old line 5 ("pass") is gone; new lines are numbered differently
-        assert 1 in result   # "import os"
-        assert 2 in result   # "+import json"
+        assert 1 in result  # "import os"
+        assert 2 in result  # "+import json"
 
     def test_added_file_patch(self):
         result = get_new_file_lines(ADDED_FILE_PATCH)
@@ -57,9 +57,9 @@ class TestGetNewFileLines:
             " line12\n"
         )
         result = get_new_file_lines(patch)
-        assert 1 in result   # context line from first hunk
-        assert 2 in result   # new_line2
-        assert 3 in result   # line3
+        assert 1 in result  # context line from first hunk
+        assert 2 in result  # new_line2
+        assert 3 in result  # line3
         assert 10 in result  # line10
         assert 11 in result  # added_line
         assert 12 in result  # line11

@@ -20,7 +20,7 @@ ANALYSIS_RESULTS = {
                 {
                     "type": "security",
                     "severity": "high",
-                    "line": 2,          # line 2 IS in the diff below
+                    "line": 2,  # line 2 IS in the diff below
                     "description": "SQL injection risk",
                     "suggestion": "Use parameterized queries",
                     "production_impact": "An attacker can dump the database.",
@@ -28,7 +28,7 @@ ANALYSIS_RESULTS = {
                 {
                     "type": "style",
                     "severity": "medium",
-                    "line": 99,         # line 99 is NOT in the diff below
+                    "line": 99,  # line 99 is NOT in the diff below
                     "description": "Missing docstring",
                     "suggestion": "Add a docstring",
                     "production_impact": "",
@@ -70,19 +70,25 @@ class TestBuildReview:
         self.svc = GitHubReviewService(github_token="ghp_test")
 
     def test_inline_comment_created_for_line_in_diff(self):
-        review = self.svc.build_review(ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA)
+        review = self.svc.build_review(
+            ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA
+        )
         # Line 2 is in diff (lines 1,2,3 are added)
         assert any(c.line == 2 and c.path == "app/main.py" for c in review.comments)
 
     def test_out_of_diff_issue_goes_to_body(self):
-        review = self.svc.build_review(ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA)
+        review = self.svc.build_review(
+            ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA
+        )
         # Line 99 is NOT in diff; it should not be an inline comment
         assert not any(c.line == 99 for c in review.comments)
         # It should appear in the review body instead
         assert "99" in review.body or "Missing docstring" in review.body
 
     def test_high_severity_triggers_request_changes(self):
-        review = self.svc.build_review(ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA)
+        review = self.svc.build_review(
+            ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA
+        )
         assert review.event == "REQUEST_CHANGES"
 
     def test_low_severity_only_triggers_comment(self):
@@ -98,9 +104,14 @@ class TestBuildReview:
                     "language": "python",
                     "size": 100,
                     "issues": [
-                        {"type": "style", "severity": "low", "line": 1,
-                         "description": "Trailing space", "suggestion": "Remove it",
-                         "production_impact": ""},
+                        {
+                            "type": "style",
+                            "severity": "low",
+                            "line": 1,
+                            "description": "Trailing space",
+                            "suggestion": "Remove it",
+                            "production_impact": "",
+                        },
                     ],
                 }
             },
@@ -109,13 +120,17 @@ class TestBuildReview:
         assert review.event == "COMMENT"
 
     def test_comment_body_contains_production_impact(self):
-        review = self.svc.build_review(ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA)
+        review = self.svc.build_review(
+            ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA
+        )
         inline = next(c for c in review.comments if c.line == 2)
         assert "Why this matters in production" in inline.body
         assert "An attacker can dump the database." in inline.body
 
     def test_comment_body_contains_suggestion(self):
-        review = self.svc.build_review(ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA)
+        review = self.svc.build_review(
+            ANALYSIS_RESULTS, FILES_FOR_ANALYSIS, PR_METADATA
+        )
         inline = next(c for c in review.comments if c.line == 2)
         assert "Suggested fix" in inline.body
         assert "parameterized queries" in inline.body
