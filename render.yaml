@@ -1,7 +1,17 @@
+envVarGroups:
+  - name: code-review-shared-env
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true # Render will generate a cryptographically secure random value
+      - key: ENVIRONMENT
+        value: production
+      - key: OPENAI_API_KEY
+        sync: false # You will input this manually in the Render dashboard
+      - key: GITHUB_TOKEN
+        sync: false # You will input this manually in the Render dashboard
+
 databases:
   - name: code-review-db
-    databaseName: code_review
-    user: postgres
     plan: free
 
 services:
@@ -16,8 +26,10 @@ services:
     name: code-review-web
     env: docker
     plan: free
-    preDeployCommand: "uv run alembic upgrade head" # Automatically apply DB migrations on deploy
+    # Since the free tier doesn't support preDeployCommand, we chain migration + start command:
+    dockerCommand: "sh -c 'uv run alembic upgrade head && uv run uvicorn app.main:app --port 8000 --host 0.0.0.0'"
     envVars:
+      - fromGroup: code-review-shared-env
       - key: DATABASE_URL
         fromDatabase:
           name: code-review-db
@@ -37,14 +49,6 @@ services:
           type: redis
           name: code-review-redis
           property: connectionString
-      - key: SECRET_KEY
-        generateValue: true # Render will generate a cryptographically secure random value
-      - key: ENVIRONMENT
-        value: production
-      - key: OPENAI_API_KEY
-        sync: false # You will input this manually in the Render dashboard
-      - key: GITHUB_TOKEN
-        sync: false # You will input this manually in the Render dashboard
 
   # Celery Background Worker
   - type: worker
@@ -53,6 +57,7 @@ services:
     plan: free
     dockerCommand: "uv run celery -A app.tasks.celery_app worker --loglevel=info"
     envVars:
+      - fromGroup: code-review-shared-env
       - key: DATABASE_URL
         fromDatabase:
           name: code-review-db
@@ -72,20 +77,3 @@ services:
           type: redis
           name: code-review-redis
           property: connectionString
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: code-review-web
-          property: SECRET_KEY # Share the generated secret key with the worker
-      - key: ENVIRONMENT
-        value: production
-      - key: OPENAI_API_KEY
-        fromService:
-          type: web
-          name: code-review-web
-          property: OPENAI_API_KEY # Share API keys between web and worker
-      - key: GITHUB_TOKEN
-        fromService:
-          type: web
-          name: code-review-web
-          property: GITHUB_TOKEN
