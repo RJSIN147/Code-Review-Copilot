@@ -217,3 +217,10 @@ __marimo__/
 
 .vscode/plans
 .github/copilot-instructions.md
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env*
+.omo/

@@ -140,7 +140,7 @@ graph TD
 
 ### **Backend Framework**
 
-- **FastAPI** - Modern async web framewor
+- **FastAPI** - Modern async web framework
 - **SQLModel** - Type-safe database ORM combining Pydantic and SQLAlchemy
 - **Celery** - Distributed task queue with Redis broker for async processing
 - **Redis** - High-performance caching and message broker
@@ -163,6 +163,14 @@ graph TD
 - **Pytest** - Comprehensive testing framework with async support
 - **Ruff** - High-performance Python linting and formatting
 
+### **Frontend**
+
+- **React 19** - Modern UI library with hooks and concurrent features
+- **TypeScript** - Type-safe JavaScript with static analysis
+- **Vite** - Fast development server and optimized production builds
+- **Tailwind CSS v4** - Utility-first CSS with CSS-native configuration
+- **SWR** - Stale-while-revalidate data fetching with polling support
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -173,6 +181,11 @@ Ensure you have the following installed on your system:
 - **Docker & Docker Compose** (For infrastructure services)
 - **UV Package Manager**
 - **Git** (For version control)
+
+For the optional web UI:
+
+- **Node.js 20+**
+- **npm** (comes with Node.js)
 
 #### Optional
 
@@ -314,16 +327,60 @@ Monitor the progress of an analysis task.
 curl "http://localhost:8000/api/v1/status/uuid-task-id"
 ```
 
+### List Analysis Tasks
+
+**GET** `/api/v1/tasks`
+
+List recent analysis tasks with pagination and optional status filtering.
+
+**Query Parameters:**
+
+- `limit` (int, default 20) - Maximum number of tasks to return
+- `offset` (int, default 0) - Number of tasks to skip
+- `status_filter` (string, optional) - Filter by status (`pending`, `processing`, `completed`, `failed`, `cancelled`)
+
+**Response (200 OK):**
+
+```json
+{
+  "tasks": [
+    {
+      "task_id": "uuid-task-id",
+      "status": "completed",
+      "repo_url": "https://github.com/owner/repo",
+      "pr_number": 123,
+      "progress": 100.0,
+      "created_at": "2025-09-17T12:01:17.308745"
+    }
+  ],
+  "total_count": 1,
+  "has_more": false
+}
+```
+
+**cURL Example:**
+
+```bash
+curl "http://localhost:8000/api/v1/tasks?limit=10&offset=0&status_filter=completed"
+```
+
 ### Cancel Analysis Task
 
-**POST** `/api/v1/cancel/{task_id}`
+**DELETE** `/api/v1/tasks/{task_id}`
 
-Cancel a running analysis task.
+Cancel a running or pending analysis task.
+
+**Request Body (optional):**
+
+```json
+{
+  "reason": "User requested cancellation"
+}
+```
 
 **Response:**
 
 ```json
-
 {
   "task_id": "uuid-task-id",
   "status": "cancelled",
@@ -331,10 +388,12 @@ Cancel a running analysis task.
 }
 ```
 
-**CURL Example:**
+**cURL Example:**
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/cancel/uuid-task-id"
+curl -X DELETE "http://localhost:8000/api/v1/tasks/uuid-task-id" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "User requested cancellation"}'
 ```
 
 ### Get Analysis Results
@@ -394,6 +453,66 @@ curl -X POST "http://localhost:8000/api/v1/cancel/uuid-task-id"
 
 ```bash
 curl "http://localhost:8000/api/v1/results/uuid-task-id"
+```
+
+## 🎨 Frontend Development
+
+A React-based web UI is available in the `frontend/` directory for interactively submitting PRs, monitoring tasks, and viewing analysis results.
+
+### Setup
+
+```bash
+# Install frontend dependencies
+make frontend-install
+
+# Or run directly in the frontend folder
+cd frontend && npm install
+```
+
+### Running the Dev Server
+
+```bash
+# Start the frontend on http://localhost:3000
+make frontend-dev
+```
+
+The Vite dev server proxies `/api/*` requests to `http://localhost:8000`, so the backend must be running.
+
+### Building for Production
+
+```bash
+make frontend-build
+```
+
+### Verifying the API Contract
+
+A curl-based verification script covers the main API flows used by the frontend:
+
+```bash
+bash frontend/scripts/verify.sh
+```
+
+Expected output: all checks pass (health, validation error, submit, list, status, cancel).
+
+### Frontend Project Structure
+
+```bash
+frontend/
+├── public/              # Static assets
+├── scripts/
+│   └── verify.sh        # API contract verification script
+├── src/
+│   ├── components/      # UI components (forms, lists, cards, panels)
+│   ├── components/ui/   # Reusable primitives (Button, Input, Badge, etc.)
+│   ├── hooks/           # SWR data-fetching hooks
+│   ├── services/        # Typed API client
+│   ├── types/           # TypeScript API types
+│   ├── App.tsx          # Dashboard layout
+│   └── main.tsx         # Application entry point
+├── index.html
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
 ```
 
 ## 🌐 Live Testing
@@ -634,7 +753,7 @@ uv run alembic downgrade -1
 
 ```bash
 code_reviewer_agent/
-├── app/
+├── app/                 # FastAPI backend
 │   ├── agents/          # AI workflow logic
 │   │   ├── ai_workflow.py
 │   │   ├── analyzer.py
@@ -648,11 +767,17 @@ code_reviewer_agent/
 │   │   └── llm_service.py
 │   ├── tasks/           # Celery tasks
 │   └── utils/           # Utilities
+├── frontend/            # React + TypeScript web UI
+│   ├── scripts/         # API verification scripts
+│   ├── src/             # Components, hooks, types, API client
+│   ├── index.html
+│   └── package.json
 ├── tests/               # Test suite
 │   ├── fixtures/        # Test fixtures
 │   ├── integration/     # Integration tests
 │   └── unit/           # Unit tests
 ├── migrations/          # Database migrations
+├── Makefile            # Convenience commands (frontend-dev, etc.)
 └── docs/               # Documentation
 ```
 
