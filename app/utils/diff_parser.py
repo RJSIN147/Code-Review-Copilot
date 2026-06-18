@@ -7,7 +7,6 @@ receive inline GitHub review comments.
 """
 
 import re
-from typing import Optional
 from app.utils.logger import logger
 
 

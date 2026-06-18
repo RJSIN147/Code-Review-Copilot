@@ -1,6 +1,5 @@
 """Unit tests for the diff parser utility."""
 
-import pytest
 from app.utils.diff_parser import get_new_file_lines, is_line_in_diff, build_patch_index
 
 

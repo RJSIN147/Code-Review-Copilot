@@ -8,7 +8,6 @@ GitHub REST API (Reviews endpoint). Requires a GitHub token with
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 import httpx
 
