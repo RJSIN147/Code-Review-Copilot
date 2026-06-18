@@ -227,6 +227,12 @@ def analyze_pr_task(
 
         logger.info(f"Fetched metadata for PR: '{pr_metadata['title']}'")
 
+        # Fetch existing PR comments so the reviewer agent can avoid repeating
+        # feedback that has already been raised (GitHub API only, no cloning).
+        pr_metadata["existing_comments"] = github_service.get_pull_request_comments(
+            repo_url, pr_number
+        )
+
         # Check if PR is analyzable
         if pr_metadata["state"] not in ["open", "closed"]:
             run_async_in_celery(

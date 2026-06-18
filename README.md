@@ -90,51 +90,114 @@ The Code Reviewer Agent is designed to handle pull requests of varying sizes whi
 
 1. User submits a Pull Request URL and PR number.
 2. FastAPI validates the request and queues a background task.
-3. Celery workers fetch PR metadata and changed files from GitHub.
-4. LangGraph determines an analysis strategy.
-5. AI agents review files and identify issues.
-6. Findings are aggregated into a final report.
-7. Results are stored and made available through the API.
+3. Celery workers fetch PR metadata, changed files (+ diffs), and existing comments from GitHub.
+4. An **orchestrator agent** triages the changed files and decides what to review directly vs. delegate.
+5. **Sub-agents** review delegated files in parallel; the orchestrator reviews the rest — all via tools (diffs, search, file ranges) and aware of the PR's existing comments.
+6. Findings are **deduplicated** (against existing comments and each other) and aggregated into a final report.
+7. Results are stored, and inline comments are posted back to the PR.
 
 ## 🤖 AI Agent Workflow
 
+The reviewer uses an **orchestrator–worker agent architecture**. A single
+**orchestrator agent** is seeded only with the PR's intent and a manifest of the
+changed files (names + line counts) — *not* the file contents. It then drives the
+whole review by calling tools: reviewing trivial files itself, and **delegating
+non-trivial files to dedicated sub-agents** that run in parallel, each with its
+own isolated context window. The model decides *what* to review and *what* to
+delegate; the orchestration code executes those decisions.
+
+Everything is served from data already fetched via the GitHub API for the PR —
+**no repository cloning** and no extra per-tool API calls.
+
 ```mermaid
 graph TD
-    Start([PR Analysis Request]) --> Triage[AI Triage Node<br/>• Examine PR metadata<br/>• Identify critical files<br/>• Set analysis strategy]
+    Start([PR Analysis Request]) --> Fetch[Fetch PR metadata, existing<br/>comments, changed files + diffs]
+    Fetch --> Triage[Triage: keep reviewable<br/>code files by language]
+    Triage --> Orch
 
-    Triage --> FileLoop{Files to Analyze?}
-
-    FileLoop -->|Yes| AnalyzeFile[File Analysis Node<br/>• Deep code analysis<br/>• Issue detection<br/>• LLM integration]
-
-    AnalyzeFile --> UpdateProgress[Update Progress<br/>• Status tracking<br/>• Real-time updates]
-
-    UpdateProgress --> FileLoop
-
-    FileLoop -->|No| Synthesize[Synthesis Node<br/>• Aggregate findings<br/>• Generate summary<br/>• Calculate metrics]
-
-    Synthesize --> SaveResults[Save Results<br/>• Database storage<br/>• Cache updates]
-
-    SaveResults --> Complete([Analysis Complete])
-
-    subgraph "AI Decision Points"
-        Triage
-        AnalyzeFile
-        Synthesize
+    subgraph ORCH["🧭 Orchestrator Agent — one LLM tool-loop"]
+        Orch[Seeded with PR intent +<br/>file manifest only]
+        Orch --> Decide{Per file:<br/>trivial or non-trivial?}
+        Decide -->|trivial| Self[Review itself via<br/>get_file_diff / search_code /<br/>read_file_range]
+        Decide -->|non-trivial| Deleg[spawn_file_reviewer]
     end
 
-    subgraph "Data Operations"
-        UpdateProgress
-        SaveResults
+    Deleg -->|parallel, semaphore-bounded| SUB
+
+    subgraph SUB["🔧 Sub-agents — one LLM tool-loop per file, isolated context"]
+        S1[Sub-agent reviews ONE file<br/>data tools only, cannot delegate]
     end
 
-    classDef ai fill:#e3f2fd
+    S1 -->|findings + summary| Merge
+    Self --> Merge
+    Merge[Consolidate + Dedup:<br/>drop should_report=false,<br/>guard vs existing comments,<br/>drop within-run duplicates]
+    Merge --> Synth[Synthesize: counts +<br/>severity / type breakdown]
+    Synth --> Save[Save to DB +<br/>post inline PR comments]
+    Save --> Done([Analysis Complete])
+
+    classDef agent fill:#e3f2fd
     classDef data fill:#e8f5e8
-    classDef flow fill:#fff3e0
-
-    class Triage,AnalyzeFile,Synthesize ai
-    class UpdateProgress,SaveResults data
-    class Start,Complete,FileLoop flow
+    class Orch,Self,Deleg,S1 agent
+    class Merge,Synth,Save data
 ```
+
+### Orchestrator & Sub-agents
+
+| | **Orchestrator** | **Sub-agent** |
+|---|---|---|
+| Count | one per review | one per delegated file (parallel) |
+| Context window | shared, sees the manifest + what it pulls | isolated, scoped to its single file |
+| Tools | all data tools **+ `spawn_file_reviewer`** | data tools only (**no delegation** → one level deep) |
+| Output | its own direct findings | findings for its file (returned to the orchestrator as a summary) |
+| Round cap | `max(12, n_files + 8)` tool-loops | `MAX_TOOL_ITERATIONS` (default 4) |
+
+Each agent is a **tool-calling loop**: it calls tools → receives results → calls
+more → and finally emits **structured findings** validated by a Pydantic schema.
+Sub-agent findings and the orchestrator's direct findings are merged, deduped,
+and grouped per file.
+
+### 🧰 Tools
+
+All tools answer from the PR data already in memory (diffs + file contents +
+pre-fetched comments). `spawn_file_reviewer` is special — it launches a sub-agent
+rather than returning stored data, so only the orchestrator has it.
+
+| Tool | Available to | Parameters | What it does |
+|---|---|---|---|
+| `get_existing_comments` | orchestrator + sub-agent | — | Returns the review + conversation comments **already** on the PR (from humans and other bots), so findings can be deduplicated. |
+| `list_changed_files` | orchestrator + sub-agent | — | Lists every changed file with its `+added/-deleted` line counts. |
+| `get_file_diff` | orchestrator + sub-agent | `file_path: str` | Returns the unified diff (patch) of a changed file. |
+| `search_code` | orchestrator + sub-agent | `query: str`, `file_path?: str` | Case-insensitive substring search across the changed files' content (optionally scoped to one file); returns `path:line: text` matches. |
+| `read_file_range` | orchestrator + sub-agent | `file_path: str`, `start_line: int`, `end_line: int` | Returns a **line-numbered** slice of a file's content (capped at **100 lines** per call). |
+| `spawn_file_reviewer` | **orchestrator only** | `file_path: str` | **Delegates** a whole file to a dedicated sub-agent with its own context window. Runs in parallel; returns a short summary of what the sub-agent found. |
+
+### 🔁 Deduplication & the skip mechanism
+
+Because the agent can read the PR's existing comments, every finding carries a
+**`should_report`** flag and a **`skip_reason`**, and duplicates are removed in
+two layers:
+
+1. **Model judgment (prompt-driven):** for each finding the model sets
+   `should_report = false` with a `skip_reason` of `duplicate`,
+   `low_confidence`, `nitpick`, or `out_of_scope` — e.g. if the same issue was
+   already raised by a human or another bot (CodeRabbit / Copilot / Sourcery), or
+   in a previous run.
+2. **Deterministic guard (`_consolidate`):** a code-level backstop drops any
+   finding the model marked skip, plus anything that lands on (or within a few
+   lines of) an existing comment, plus within-run duplicates. Every drop is
+   logged with its reason.
+
+Only the surviving findings are saved and posted — so **re-running the review
+never re-posts comments that already exist.**
+
+### 🎛️ Caps (keep the model-driven loops bounded)
+
+- **Orchestrator rounds:** `max(12, n_files + 8)` — scales with PR size.
+- **Sub-agent rounds:** `MAX_TOOL_ITERATIONS` (default 4).
+- **One-level delegation:** sub-agents have no `spawn_file_reviewer`, so they
+  cannot recurse.
+- **Parallel sub-agents:** bounded by `max_concurrent_analyses` (semaphore).
+- **`read_file_range`:** ≤ 100 lines per call. **LLM requests:** 90s timeout.
 
 ## 🛠️ Technology Stack
 
@@ -830,12 +893,5 @@ code_reviewer_agent/
 
 ---
 
-<h6 align="center">
-<img src="https://avatars.githubusercontent.com/u/90309290?v=4" height=30 title="zingzy Copyright">
-<br>
-© zingzy . 2025
-
-All Rights Reserved</h6>
-
 <p align="center">
-	<a href="https://github.com/zingzy/code-review-agent/blob/master/LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=APACHE-2.0&logoColor=d9e0ee&colorA=363a4f&colorB=b7bdf8"/></a>
+	<a href="./LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=APACHE-2.0&logoColor=d9e0ee&colorA=363a4f&colorB=b7bdf8"/></a>

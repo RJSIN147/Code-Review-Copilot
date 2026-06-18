@@ -224,3 +224,7 @@ frontend/dist/
 frontend/.vite/
 frontend/.env*
 .omo/
+
+# Local-only planning doc + tooling artifacts
+docs/reviewer-v2-plan.md
+.playwright-mcp/

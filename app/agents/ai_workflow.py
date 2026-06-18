@@ -5,12 +5,11 @@ This module defines a sophisticated LangGraph workflow where an AI agent
 makes  decisions about how to analyze a pull request.
 """
 
-import asyncio
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.agents.tools.ai_tools import analyze_code_with_ai
+from app.agents.review_orchestrator import ReviewOrchestrator
 from app.config.settings import get_settings
 from app.services.llm_service import LLMService
 from app.utils.language_detection import LanguageDetector
@@ -58,14 +57,15 @@ class AIWorkflow:
 
         # Add nodes
         workflow.add_node("triage_pr", self.triage_pr_node)
-        workflow.add_node("analyze_files", self.analyze_files_node)
+        workflow.add_node("review_pr", self.review_node)
         workflow.add_node("synthesize_report", self.synthesize_report_node)
 
-        # Define the flow. Files are independent of one another, so they are
-        # analyzed concurrently inside a single node instead of one at a time.
+        # Define the flow. Triage filters to reviewable (code) files, then a
+        # single orchestrator agent reviews them — deciding, per file, whether to
+        # review it directly or delegate it to a dedicated sub-agent.
         workflow.set_entry_point("triage_pr")
-        workflow.add_edge("triage_pr", "analyze_files")
-        workflow.add_edge("analyze_files", "synthesize_report")
+        workflow.add_edge("triage_pr", "review_pr")
+        workflow.add_edge("review_pr", "synthesize_report")
         workflow.add_edge("synthesize_report", END)
 
         return workflow.compile()
@@ -82,6 +82,10 @@ class AIWorkflow:
         ``progress_callback`` is an optional async callable invoked as each file
         finishes analysis: ``await progress_callback(completed, total, file_path)``.
         """
+        logger.opt(colors=True).info(
+            "<cyan><bold>LangGraph flow:</bold></cyan> START → triage_pr → "
+            "<magenta>review_pr (orchestrator)</magenta> → synthesize_report → END"
+        )
         llm_service = LLMService()
 
         initial_state: AIAnalysisState = {
@@ -130,77 +134,32 @@ class AIWorkflow:
         )
         return state
 
-    async def analyze_files_node(self, state: AIAnalysisState) -> AIAnalysisState:
+    async def review_node(self, state: AIAnalysisState) -> AIAnalysisState:
         """
-        Analyze every critical file concurrently.
+        Run the model-driven review orchestrator over the triaged files.
 
-        Each file is an independent LLM call that does not depend on the others,
-        so they are dispatched together with ``asyncio.gather`` instead of being
-        processed sequentially. Concurrency is bounded by the configured
-        ``max_concurrent_analyses`` to avoid overwhelming the LLM provider.
+        A single orchestrator agent is seeded with the PR intent and the manifest
+        of reviewable files, then decides — per file — whether to review it
+        directly via tools or delegate it to a dedicated sub-agent. Findings are
+        returned already grouped per file.
         """
-        critical_files = state["critical_files"]
-        if not critical_files:
+        critical = set(state["critical_files"])
+        files = [
+            f
+            for f in state["files_data"]
+            if f.get("filename") in critical and f.get("content")
+        ]
+        if not files:
+            state["analysis_results"] = []
             return state
 
-        files_by_path = {f.get("filename"): f for f in state["files_data"]}
-        llm_service = state["llm_service"]
-        progress_callback = state.get("progress_callback")
-
-        settings = get_settings()
-        max_concurrency = max(1, settings.agent.max_concurrent_analyses)
-        semaphore = asyncio.Semaphore(max_concurrency)
-
-        total = len(critical_files)
-        completed = 0
-
-        async def analyze_one(file_path: str) -> Optional[FileAnalysis]:
-            file_data = files_by_path.get(file_path)
-            if not file_data or not file_data.get("content"):
-                logger.warning(
-                    f"No content found for file {file_path}, skipping analysis."
-                )
-                return None
-
-            async with semaphore:
-                logger.info(f"AI is analyzing file: {file_path}")
-                issues = await analyze_code_with_ai(
-                    llm_service, file_path, file_data["content"]
-                )
-            return {"file_path": file_path, "issues": issues}
-
-        async def analyze_and_report(file_path: str) -> Optional[FileAnalysis]:
-            nonlocal completed
-            try:
-                return await analyze_one(file_path)
-            finally:
-                # Report progress on completion regardless of success/failure so
-                # the percentage tracks files processed, not just files that pass.
-                completed += 1
-                if progress_callback is not None:
-                    try:
-                        await progress_callback(completed, total, file_path)
-                    except Exception as cb_error:
-                        logger.warning(f"Progress callback failed: {cb_error}")
-
-        logger.info(
-            f"Analyzing {total} files concurrently (max {max_concurrency} at a time)."
+        orchestrator = ReviewOrchestrator(state["llm_service"])
+        state["analysis_results"] = await orchestrator.run(
+            pr_data=state["pr_data"],
+            files_data=files,
+            existing_comments=state["pr_data"].get("existing_comments"),
+            progress_callback=state.get("progress_callback"),
         )
-        results = await asyncio.gather(
-            *(analyze_and_report(file_path) for file_path in critical_files),
-            return_exceptions=True,
-        )
-
-        analysis_results: List[FileAnalysis] = []
-        for file_path, result in zip(critical_files, results):
-            if isinstance(result, Exception):
-                logger.error(f"Analysis failed for {file_path}: {result}")
-                continue
-            if result is None:
-                continue
-            analysis_results.append(result)
-
-        state["analysis_results"] = analysis_results
         return state
 
     async def synthesize_report_node(self, state: AIAnalysisState) -> AIAnalysisState:
