@@ -1,7 +1,7 @@
 services:
   # PostgreSQL Database
   db:
-    image: postgres:13-trixie # latest stable version as of 2025-09
+    image: postgres:13-alpine # stable version with arm64 support
     container_name: code_review_db
     environment:
       POSTGRES_USER: postgres
