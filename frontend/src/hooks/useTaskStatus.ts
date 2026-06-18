@@ -17,7 +17,7 @@ export function buildTaskStatusKey(taskId: string): TaskStatusHookKey {
 export function useTaskStatus(taskId: string | undefined): UseTaskStatusResult {
   const { data, error, isLoading } = useSWR<TaskStatusResponse>(
     taskId ? buildTaskStatusKey(taskId) : null,
-    ([, id]) => getTaskStatus(id),
+    ([, id]: TaskStatusHookKey) => getTaskStatus(id),
     {
       refreshInterval: (data: TaskStatusResponse | undefined) => {
         const status = data?.status as TaskStatus | undefined;
