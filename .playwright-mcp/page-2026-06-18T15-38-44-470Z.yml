@@ -1,0 +1,105 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e6]:
+      - heading "Code Review Copilot" [level=1] [ref=e7]
+      - paragraph [ref=e8]: AI-powered PR analysis console
+  - main [ref=e9]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - heading "Submit PR for Analysis" [level=3] [ref=e14]
+          - generic [ref=e16]:
+            - generic [ref=e17]:
+              - generic [ref=e18]: Repository URL
+              - textbox "Repository URL" [ref=e20]:
+                - /placeholder: https://github.com/owner/repo
+            - generic [ref=e21]:
+              - generic [ref=e22]: PR Number
+              - spinbutton "PR Number" [ref=e24]
+            - generic [ref=e25]:
+              - generic [ref=e26]: GitHub Token (optional)
+              - textbox "GitHub Token (optional)" [ref=e28]:
+                - /placeholder: ghp_...
+              - paragraph [ref=e29]: Required for private repositories
+            - generic [ref=e30]:
+              - button "Analyze PR" [ref=e31]
+              - button "Reset" [ref=e32]
+        - generic [ref=e33]:
+          - generic [ref=e35]:
+            - generic [ref=e36]: Analysis Tasks
+            - generic [ref=e37]:
+              - generic [ref=e38]: Filter by status
+              - combobox "Filter by status" [ref=e39] [cursor=pointer]:
+                - option "all" [selected]
+                - option "pending"
+                - option "processing"
+                - option "completed"
+                - option "failed"
+                - option "cancelled"
+          - generic [ref=e40]:
+            - table [ref=e42]:
+              - rowgroup [ref=e43]:
+                - row "Repository PR Status Created Action" [ref=e44]:
+                  - columnheader "Repository" [ref=e45]
+                  - columnheader "PR" [ref=e46]
+                  - columnheader "Status" [ref=e47]
+                  - columnheader "Created" [ref=e48]
+                  - columnheader "Action" [ref=e49]
+              - rowgroup [ref=e50]:
+                - 'row "spoo-me/url-shortener #79 cancelled 18 Jun, 15:15 View" [ref=e51]':
+                  - cell "spoo-me/url-shortener" [ref=e52]
+                  - cell "#79" [ref=e53]
+                  - cell "cancelled" [ref=e54]:
+                    - generic [ref=e55]: cancelled
+                  - cell "18 Jun, 15:15" [ref=e56]
+                  - cell "View" [ref=e57]:
+                    - button "View" [ref=e58]
+                - 'row "Zingzy/code-review-agent #2 completed 18 Jun, 14:36 View" [ref=e59]':
+                  - cell "Zingzy/code-review-agent" [ref=e60]
+                  - cell "#2" [ref=e61]
+                  - cell "completed" [ref=e62]:
+                    - generic [ref=e63]: completed
+                  - cell "18 Jun, 14:36" [ref=e64]
+                  - cell "View" [ref=e65]:
+                    - button "View" [ref=e66]
+                - 'row "spoo-me/url-shortener #79 cancelled 18 Jun, 14:28 View" [ref=e67]':
+                  - cell "spoo-me/url-shortener" [ref=e68]
+                  - cell "#79" [ref=e69]
+                  - cell "cancelled" [ref=e70]:
+                    - generic [ref=e71]: cancelled
+                  - cell "18 Jun, 14:28" [ref=e72]
+                  - cell "View" [ref=e73]:
+                    - button "View" [ref=e74]
+                - 'row "spoo-me/url-shortener #79 completed 18 Jun, 14:27 View" [ref=e75]':
+                  - cell "spoo-me/url-shortener" [ref=e76]
+                  - cell "#79" [ref=e77]
+                  - cell "completed" [ref=e78]:
+                    - generic [ref=e79]: completed
+                  - cell "18 Jun, 14:27" [ref=e80]
+                  - cell "View" [ref=e81]:
+                    - button "View" [ref=e82]
+                - 'row "Zingzy/code-review-agent #2 completed 18 Jun, 10:51 View" [ref=e83]':
+                  - cell "Zingzy/code-review-agent" [ref=e84]
+                  - cell "#2" [ref=e85]
+                  - cell "completed" [ref=e86]:
+                    - generic [ref=e87]: completed
+                  - cell "18 Jun, 10:51" [ref=e88]
+                  - cell "View" [ref=e89]:
+                    - button "View" [ref=e90]
+            - generic [ref=e91]:
+              - generic [ref=e92]: Showing 1–5 of 5
+              - generic [ref=e93]:
+                - button "Previous" [disabled]
+                - button "Next" [disabled]
+      - generic [ref=e94]:
+        - generic [ref=e95]:
+          - heading "No Task Selected" [level=3] [ref=e96]
+          - paragraph [ref=e97]: Select or submit a task to view its status.
+        - generic [ref=e98]:
+          - heading "No Task Selected" [level=3] [ref=e99]
+          - paragraph [ref=e100]: Select a completed task to view summary metrics.
+        - generic [ref=e101]:
+          - heading "No Task Selected" [level=3] [ref=e102]
+          - paragraph [ref=e103]: Select a task to view analysis results.
+  - contentinfo [ref=e104]:
+    - paragraph [ref=e106]: Code Review Copilot — FastAPI Test Console
