@@ -40,8 +40,12 @@ def _convert_issues_to_details(issues_data: list, task_id: UUID) -> list[IssueDe
         try:
             # `.get(..., default)` only covers missing keys; the LLM also emits
             # present-but-empty strings, so normalise those explicitly.
-            description = (issue_data.get("description") or "").strip() or "No description provided"
-            suggestion = (issue_data.get("suggestion") or "").strip() or "No suggestion provided"
+            description = (
+                issue_data.get("description") or ""
+            ).strip() or "No description provided"
+            suggestion = (
+                issue_data.get("suggestion") or ""
+            ).strip() or "No suggestion provided"
 
             try:
                 line = int(issue_data.get("line", 1))
