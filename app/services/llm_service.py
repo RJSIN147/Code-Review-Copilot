@@ -76,12 +76,21 @@ class LLMService:
             f"Initializing LLM service for provider: {self.settings.llm.provider}"
         )
 
-        # Configure the OpenAI client
+        # Configure the OpenAI client.
+        # JSON mode (rather than the default TOOLS mode) is used because several
+        # OpenAI-compatible providers / open models return the structured result
+        # as JSON content instead of a proper tool call, which makes TOOLS mode
+        # raise "does not support multiple tool calls".
         self.client = instructor.patch(
             AsyncOpenAI(
                 api_key=self.settings.llm.openai_api_key,
                 base_url=self.settings.llm.base_url,
-            )
+                # Bound each request so a hung/stalled call fails fast and the
+                # file is skipped, instead of stalling the whole analysis on the
+                # OpenAI client's 600s default timeout.
+                timeout=90.0,
+            ),
+            mode=instructor.Mode.JSON,
         )
         self.model = self.settings.llm.model
         logger.info(
