@@ -138,8 +138,10 @@ class LLMService:
             return validated_issues
 
         except Exception as e:
+            # Surface the failure instead of returning an empty list, which would
+            # be indistinguishable from a clean file that genuinely has no issues.
             logger.error(f"Error during LLM API call for {file_path}: {e}")
-            return []
+            raise
 
     def _create_prompt(
         self, file_path: str, code_content: str, analysis_type: str

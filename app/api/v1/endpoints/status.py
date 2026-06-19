@@ -27,18 +27,51 @@ router = APIRouter()
 
 
 def _convert_issues_to_details(issues_data: list, task_id: UUID) -> list[IssueDetail]:
-    """Convert database issue data to IssueDetail objects."""
+    """Convert database issue data to IssueDetail objects.
+
+    Hardened against partial/malformed issues from the LLM: empty strings are
+    backfilled with placeholders and non-positive line numbers are clamped, so a
+    single bad field can't fail validation and 500 the entire results response.
+    Any issue that still can't be built is skipped rather than dropping the whole
+    file's results.
+    """
     issues = []
     for issue_data in issues_data:
-        issue = IssueDetail(
-            type=IssueType(issue_data.get("type", "style")),
-            severity=IssueSeverity(issue_data.get("severity", "low")),
-            line=issue_data.get("line", 1),
-            description=issue_data.get("description", "No description"),
-            suggestion=issue_data.get("suggestion", "No suggestion"),
-            confidence=issue_data.get("confidence", 0.8),
-        )
-        issues.append(issue)
+        try:
+            # `.get(..., default)` only covers missing keys; the LLM also emits
+            # present-but-empty strings, so normalise those explicitly.
+            description = (issue_data.get("description") or "").strip() or "No description provided"
+            suggestion = (issue_data.get("suggestion") or "").strip() or "No suggestion provided"
+
+            try:
+                line = int(issue_data.get("line", 1))
+            except (TypeError, ValueError):
+                line = 1
+            line = max(line, 1)  # schema requires a positive line number
+
+            try:
+                issue_type = IssueType(issue_data.get("type", "style"))
+            except ValueError:
+                issue_type = IssueType.BEST_PRACTICE
+            try:
+                severity = IssueSeverity(issue_data.get("severity", "low"))
+            except ValueError:
+                severity = IssueSeverity.LOW
+
+            issues.append(
+                IssueDetail(
+                    type=issue_type,
+                    severity=severity,
+                    line=line,
+                    description=description,
+                    suggestion=suggestion,
+                    confidence=issue_data.get("confidence", 0.8),
+                    production_impact=issue_data.get("production_impact") or "",
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Skipping malformed issue for task {task_id}: {e}")
+            continue
     return issues
 
 

@@ -37,7 +37,9 @@ async def analyze_code_with_ai(
         )
         return issues
     except Exception as e:
+        # Propagate so the workflow can record this file as failed rather than
+        # silently treating an LLM/API error as "no issues found".
         logger.error(
             f"An error occurred in the AI code analyzer tool for {file_path}: {e}"
         )
-        return []
+        raise
