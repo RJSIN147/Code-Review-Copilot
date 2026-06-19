@@ -150,6 +150,7 @@ async def get_task_status(
             task_id=task.id,
             status=task.status,
             progress=task.progress,
+            status_message=task.status_message,
             created_at=task.created_at,
             started_at=task.started_at,
             completed_at=task.completed_at,

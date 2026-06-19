@@ -81,6 +81,7 @@ async def update_task_status(
                     task.completed_at = now
 
                 if message:
+                    task.status_message = message
                     task.error_message = (
                         message if status == TaskStatus.FAILED else None
                     )
@@ -287,16 +288,24 @@ def analyze_pr_task(
 
             logger.debug(f"Processing file {i + 1}/{file_count}: {file_path}")
 
-            # Update progress
-            progress = 30 + (i / file_count) * 50  # 30-80% for file collection
+            # Update progress (30-60% band reserved for content collection)
+            progress = 30 + ((i + 1) / file_count) * 30
             self.update_state(
                 state="PROGRESS",
                 meta={
                     "current": int(progress),
                     "total": 100,
-                    "status": f"Processing {file_path}...",
+                    "status": f"Fetching file {i + 1}/{file_count}: {file_path}",
                     "task_id": task_id,
                 },
+            )
+            run_async_in_celery(
+                update_task_status(
+                    task_uuid,
+                    TaskStatus.PROCESSING,
+                    progress,
+                    f"Fetching files ({i + 1}/{file_count}): {os.path.basename(file_path)}",
+                )
             )
 
             try:
@@ -355,26 +364,36 @@ def analyze_pr_task(
             except Exception as e:
                 logger.error(f"Error processing file {file_path}: {e}")
 
-        # Run LangGraph analysis
+        # Run LangGraph analysis (60-95% band reserved for AI analysis)
         run_async_in_celery(
             update_task_status(
-                task_uuid, TaskStatus.PROCESSING, 80.0, "Running AI analysis..."
+                task_uuid,
+                TaskStatus.PROCESSING,
+                60.0,
+                f"Running AI analysis on {len(files_for_analysis)} files...",
             )
         )
 
-        self.update_state(
-            state="PROGRESS",
-            meta={
-                "current": 85,
-                "total": 100,
-                "status": "Running AI analysis...",
-                "task_id": task_id,
-            },
-        )
+        async def report_analysis_progress(
+            completed: int, total: int, file_path: str
+        ) -> None:
+            # Map per-file completion onto the 60-95% analysis band so the
+            # progress bar advances as files are actually analyzed.
+            pct = 60.0 + (completed / total) * 35.0 if total else 95.0
+            await update_task_status(
+                task_uuid,
+                TaskStatus.PROCESSING,
+                pct,
+                f"Analyzed {completed}/{total} files — {os.path.basename(file_path)}",
+            )
 
         try:
             analysis_results = run_async_in_celery(
-                langgraph_analyzer.analyze_pr(pr_metadata, files_for_analysis)
+                langgraph_analyzer.analyze_pr(
+                    pr_metadata,
+                    files_for_analysis,
+                    progress_callback=report_analysis_progress,
+                )
             )
 
             # Check if the analysis returned an error result
@@ -405,7 +424,7 @@ def analyze_pr_task(
         # Update progress after analysis
         run_async_in_celery(
             update_task_status(
-                task_uuid, TaskStatus.PROCESSING, 90.0, "Saving results..."
+                task_uuid, TaskStatus.PROCESSING, 95.0, "Saving results..."
             )
         )
 

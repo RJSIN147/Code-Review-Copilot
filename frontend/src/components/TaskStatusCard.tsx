@@ -115,6 +115,11 @@ export function TaskStatusCard({ taskId }: TaskStatusCardProps) {
               style={{ width: `${Math.min(task.progress, 100)}%` }}
             />
           </div>
+          {task.status_message && (
+            <p className="mt-2 text-xs text-text-dim font-mono truncate">
+              {task.status_message}
+            </p>
+          )}
         </div>
 
         {/* Timestamps */}

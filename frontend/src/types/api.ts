@@ -73,6 +73,7 @@ export interface TaskStatusResponse {
   task_id: string;
   status: TaskStatus;
   progress: number;
+  status_message?: string | null;
   created_at: string;
   started_at?: string | null;
   completed_at?: string | null;
