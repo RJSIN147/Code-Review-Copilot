@@ -23,7 +23,11 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.agents.tools.review_tools import ReviewToolbox, build_orchestrator_tool_specs
+from app.agents.tools.review_tools import (
+    ReviewToolbox,
+    build_orchestrator_tool_specs,
+    preview_result,
+)
 from app.config.settings import get_settings
 from app.models.database import IssueSeverity, IssueType
 from app.utils.logger import logger
@@ -231,7 +235,11 @@ class ReviewOrchestrator:
                 logger.opt(colors=True).info(
                     "   <blue>→ {}</blue>({})", tc.function.name, self._fmt_args(args)
                 )
-                results[tc.id] = toolbox.execute(tc.function.name, args)
+                result = toolbox.execute(tc.function.name, args)
+                results[tc.id] = result
+                logger.opt(colors=True).info(
+                    "     <dim>← {}</dim>", preview_result(result)
+                )
             if spawn_calls:
                 spawn_outputs = await asyncio.gather(
                     *(

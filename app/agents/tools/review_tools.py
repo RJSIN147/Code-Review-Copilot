@@ -24,6 +24,18 @@ MAX_READ_LINES = 100
 MAX_SEARCH_RESULTS = 50
 
 
+def preview_result(text: str, max_chars: int = 160) -> str:
+    """A compact, single-line preview of a tool result, for readable logs."""
+    text = (text or "").strip()
+    if not text:
+        return "(empty)"
+    n_lines = text.count("\n") + 1
+    flat = " ".join(text.split())
+    if len(flat) > max_chars:
+        flat = flat[:max_chars] + "…"
+    return f"{n_lines} line(s) · {flat}"
+
+
 def _data_tool_specs() -> List[Dict[str, Any]]:
     """The read-only context tools shared by the orchestrator and sub-agents."""
     return [

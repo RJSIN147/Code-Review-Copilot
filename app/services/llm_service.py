@@ -13,7 +13,11 @@ from openai import AsyncOpenAI
 import instructor
 from pydantic import BaseModel, Field, field_validator
 
-from app.agents.tools.review_tools import ReviewToolbox, build_tool_specs
+from app.agents.tools.review_tools import (
+    ReviewToolbox,
+    build_tool_specs,
+    preview_result,
+)
 from app.config.settings import get_settings
 from app.models.database import IssueType, IssueSeverity
 from app.utils.diff_parser import get_new_file_lines
@@ -288,6 +292,9 @@ class LLMService:
                     "        <blue>↳ {}</blue>({})",
                     tc.function.name,
                     ", ".join(f"{k}={v}" for k, v in arguments.items()),
+                )
+                logger.opt(colors=True).info(
+                    "          <dim>← {}</dim>", preview_result(result)
                 )
                 messages.append(
                     {
