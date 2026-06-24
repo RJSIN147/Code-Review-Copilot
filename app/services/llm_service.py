@@ -237,7 +237,7 @@ class LLMService:
                 response_model=AIAnalysisResult,
                 messages=messages,
                 max_retries=2,
-                max_completion_tokens=4096,
+                max_completion_tokens=8192,
                 temperature=0.0,
             )
 
@@ -276,7 +276,7 @@ class LLMService:
                 tools=tools,
                 tool_choice="auto",
                 temperature=0.0,
-                max_completion_tokens=4096,
+                max_completion_tokens=8192,
             )
             message = completion.choices[0].message
 

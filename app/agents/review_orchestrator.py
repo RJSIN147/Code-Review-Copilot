@@ -184,6 +184,7 @@ class ReviewOrchestrator:
                 "   <magenta>⇨ DELEGATE</magenta> → sub-agent for <yellow>{}</yellow>",
                 file_path,
             )
+            issues: List[Dict[str, Any]] = []
             try:
                 async with semaphore:
                     issues = await self.llm.analyze_code(
@@ -194,21 +195,22 @@ class ReviewOrchestrator:
                         pr_context=pr_context,
                         toolbox=sub_toolbox,
                     )
+                for issue in issues:
+                    issue["file"] = file_path
+                    collected.append(issue)
+                return f"Sub-agent reviewed {file_path}: found {len(issues)} issue(s)."
             except Exception as e:
                 logger.error(f"Sub-agent for {file_path} failed: {e}")
                 return f"Sub-agent for {file_path} failed: {e}"
-
-            for issue in issues:
-                issue["file"] = file_path
-                collected.append(issue)
-
-            completed += 1
-            if progress_callback is not None:
-                try:
-                    await progress_callback(completed, total_files, file_path)
-                except Exception as cb_error:
-                    logger.warning(f"Progress callback failed: {cb_error}")
-            return f"Sub-agent reviewed {file_path}: found {len(issues)} issue(s)."
+            finally:
+                # Always report progress, even when the sub-agent fails, so the
+                # progress bar can't stall on a single failure.
+                completed += 1
+                if progress_callback is not None:
+                    try:
+                        await progress_callback(completed, total_files, file_path)
+                    except Exception as cb_error:
+                        logger.warning(f"Progress callback failed: {cb_error}")
 
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": _ORCHESTRATOR_SYSTEM},
@@ -229,7 +231,7 @@ class ReviewOrchestrator:
                 tools=tools,
                 tool_choice="auto",
                 temperature=0.0,
-                max_completion_tokens=4096,
+                max_completion_tokens=8192,
             )
             message = completion.choices[0].message
             if not message.tool_calls:
@@ -351,10 +353,13 @@ class ReviewOrchestrator:
         should_report=false, a finding that lands on (or within NEAR_LINES of) an
         existing comment is dropped here.
         """
+        # Only comments anchored to a real line participate in line-based dedup;
+        # comments with no line (general conversation) must not become a synthetic
+        # line 0 that swallows findings whose line is also 0/unknown.
         existing = [
-            (c.get("path"), c.get("line") or c.get("original_line") or 0)
+            (c.get("path"), int(c.get("line") or c.get("original_line")))
             for c in (existing_comments or [])
-            if c.get("path")
+            if c.get("path") and (c.get("line") or c.get("original_line"))
         ]
         kept: List[Dict[str, Any]] = []
         seen: List[tuple] = []
@@ -432,7 +437,7 @@ class ReviewOrchestrator:
                 response_model=OrchestratorReview,
                 messages=messages,
                 max_retries=2,
-                max_completion_tokens=4096,
+                max_completion_tokens=8192,
                 temperature=0.0,
             )
         except Exception as e:

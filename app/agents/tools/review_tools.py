@@ -240,6 +240,11 @@ class ReviewToolbox:
             f = self._files.get(file_path)
             if not f:
                 return f"No changed file named '{file_path}' in this PR."
+            if not f.get("content"):
+                return (
+                    f"'{file_path}' has no searchable content "
+                    "(binary, deleted, or too large to fetch)."
+                )
             targets = {file_path: f}
         else:
             targets = self._files
@@ -287,8 +292,8 @@ class ReviewToolbox:
         out = []
         for c in self._comments:
             where = f" on {c.get('path')}:{c.get('line')}" if c.get("path") else ""
+            body = " ".join((c.get("body") or "").split())  # flatten multi-line bodies
             out.append(
-                f"[{c.get('kind', 'comment')}] {c.get('author', 'unknown')}{where}: "
-                f"{c.get('body', '')}"
+                f"[{c.get('kind', 'comment')}] {c.get('author', 'unknown')}{where}: {body}"
             )
         return "Existing comments on this PR:\n" + "\n".join(out)
