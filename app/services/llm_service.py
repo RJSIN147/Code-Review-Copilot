@@ -16,8 +16,56 @@ from pydantic import BaseModel, Field, field_validator
 from app.agents.tools.review_tools import ReviewToolbox, build_tool_specs
 from app.config.settings import get_settings
 from app.models.database import IssueType, IssueSeverity
+from app.utils.diff_parser import get_new_file_lines
 from app.utils.logger import logger
 from app.utils.language_detection import LanguageDetector
+
+
+# How many lines of surrounding context to include around each changed region
+# when building the per-file review prompt. This keeps large files from bloating
+# the context window — the model can still pull more via the tools.
+DIFF_CONTEXT_LINES = 30
+
+
+def _relevant_code_window(
+    code_content: str,
+    file_diff: Optional[str],
+    context_lines: int = DIFF_CONTEXT_LINES,
+) -> str:
+    """Return only the changed regions of a file plus surrounding context.
+
+    Uses the diff to find which new-file lines changed, expands each by
+    ``context_lines`` on both sides, merges overlapping ranges, and renders a
+    line-numbered excerpt with ``...`` markers for the elided gaps. Falls back to
+    the full content when there is no usable diff or the windows already cover
+    most of the file.
+    """
+    lines = code_content.splitlines()
+    if not lines:
+        return code_content
+
+    changed = get_new_file_lines(file_diff) if file_diff else set()
+    if not changed:
+        return code_content
+
+    keep: set[int] = set()
+    for ln in changed:
+        start = max(1, ln - context_lines)
+        end = min(len(lines), ln + context_lines)
+        keep.update(range(start, end + 1))
+
+    # If the windows already cover (almost) the whole file, don't bother slicing.
+    if len(keep) >= len(lines):
+        return code_content
+
+    out: List[str] = []
+    prev: Optional[int] = None
+    for i in sorted(keep):
+        if prev is not None and i != prev + 1:
+            out.append("         ...")
+        out.append(f"{i:>6}  {lines[i - 1]}")
+        prev = i
+    return "\n".join(out)
 
 
 # Pydantic models for structured output from LLM
@@ -255,8 +303,14 @@ class LLMService:
             diff_section = (
                 f"**Diff (the changes to review):**\n```diff\n{file_diff}\n```"
             )
+            relevant_code = _relevant_code_window(code_content, file_diff)
+            code_section = (
+                "**Relevant code (changed regions + surrounding context, "
+                f"line-numbered):**\n```{lang}\n{relevant_code}\n```"
+            )
         else:
             diff_section = "**Diff:** (no diff available — review the file as a whole)"
+            code_section = f"**Full file (reference/context only):**\n```{lang}\n{code_content}\n```"
 
         issue_types = ", ".join([e.value for e in IssueType])
         severities = ", ".join([e.value for e in IssueSeverity])
@@ -269,16 +323,13 @@ class LLMService:
 
 {diff_section}
 
-**Full file (reference/context only):**
-```{lang}
-{code_content}
-```
+{code_section}
 
 **Instructions**
-1. Review the **changes in the diff**, judged against the pull request's intent — not the whole file. Use the file content only as supporting context.
+1. Review the **changes in the diff**, judged against the pull request's intent — not the whole file. The code excerpt is line-numbered and shows the changed regions plus surrounding context; use it as supporting context only.
 2. If a change here affects or depends on another changed file, call `get_file_diff` to inspect it; call `get_existing_comments` to avoid repeating feedback already raised.
 3. For each issue provide:
-   - `line`: the line number in the file
+   - `line`: the line number in the file (use the numbers shown in the code excerpt)
    - `type`: one of {issue_types}
    - `severity`: one of {severities}
    - `description`: a concise description of the problem
