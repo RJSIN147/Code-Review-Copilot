@@ -18,6 +18,7 @@ Caps keep the model-driven loops bounded (see the constants below).
 """
 
 import asyncio
+import collections
 import json
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +44,21 @@ class OrchestratorIssue(BaseModel):
     description: str = Field(..., description="A description of the issue.")
     suggestion: str = Field(..., description="A suggestion to fix the issue.")
     production_impact: str = Field(default="")
+    should_report: bool = Field(
+        default=True,
+        description=(
+            "Whether to report this issue. Set false to skip duplicates of "
+            "existing comments, low-confidence guesses, nitpicks, or "
+            "out-of-scope items."
+        ),
+    )
+    skip_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "When should_report is false: 'duplicate', 'low_confidence', "
+            "'nitpick', or 'out_of_scope'."
+        ),
+    )
 
     @field_validator("type", mode="before")
     def _validate_type(cls, v):
@@ -66,17 +82,43 @@ class OrchestratorReview(BaseModel):
 
 
 _ORCHESTRATOR_SYSTEM = (
-    "You are the lead reviewer orchestrating a code review of a pull request. "
-    "You are given the PR's intent and a manifest of the changed files (names + "
-    "line counts) — nothing else up front. Decide how to review each file: "
-    "review small or simple files yourself using get_file_diff, search_code and "
-    "read_file_range; delegate large or complex files to a dedicated sub-agent "
-    "with spawn_file_reviewer (it has its own context window and returns a "
-    "summary of what it found). Call get_existing_comments to avoid repeating "
-    "feedback already raised. When every file worth reviewing has been handled "
-    "(by you or a sub-agent), stop calling tools. Then report ONLY the issues "
-    "you found directly — issues from sub-agents are recorded separately, so do "
-    "not repeat them. Only report issues caused or exposed by the changes."
+    "You are the lead reviewer for a pull request. You coordinate the whole "
+    "review: triage the changed files, decide what to review yourself versus "
+    "delegate, gather context with tools, and report only high-signal, novel "
+    "findings.\n\n"
+    "INPUTS: the PR title and description (the intent) and a manifest of changed "
+    "files with +added/-deleted counts. Pull anything else with the tools.\n\n"
+    "TOOLS:\n"
+    "- get_existing_comments(): comments ALREADY on this PR, from humans and other "
+    "review bots — ALWAYS call this first.\n"
+    "- list_changed_files(); get_file_diff(path); search_code(query, path?); "
+    "read_file_range(path, start, end) (<=100 lines).\n"
+    "- spawn_file_reviewer(path): hand a whole file to a dedicated sub-agent with "
+    "its own context window. Sub-agents run IN PARALLEL; their findings are "
+    "recorded automatically and returned to you as a short summary.\n\n"
+    "HOW TO WORK — be decisive and batch your work:\n"
+    "1. FIRST call get_existing_comments() so you know what was already raised.\n"
+    "2. DELEGATE LIBERALLY: spawn_file_reviewer for EVERY non-trivial file (more "
+    "than ~15 changed lines, or any logic/security/data/control-flow change). "
+    "Sub-agents are parallel and cost you almost nothing — when in doubt, "
+    "delegate. Only review trivially small files (a handful of changed lines: "
+    "config, constants, docs) yourself.\n"
+    "3. BATCH tool calls — issue many in a single turn (spawn all the files you "
+    "will delegate at once; fetch several diffs together). Never trickle one tool "
+    "per turn.\n"
+    "4. You have a limited number of turns: it is far better to delegate every "
+    "remaining file than to run out of turns with files unreviewed.\n\n"
+    "WHAT TO REPORT: review the CHANGES (the diff) against the PR's intent. Report "
+    "ONLY issues CAUSED or EXPOSED by the changes, never unrelated pre-existing "
+    "code. Report only issues YOU found directly — sub-agent findings are recorded "
+    "separately, so do not repeat them.\n\n"
+    "DEDUPLICATION & SIGNAL — for EVERY finding, using the existing comments, set "
+    "should_report=false with a skip_reason when it is a 'duplicate' (already "
+    "raised by an existing comment — yours from a prior run or another bot like "
+    "CodeRabbit/Copilot/Sourcery — even at a nearby line), 'low_confidence', a "
+    "'nitpick', or 'out_of_scope'. Set should_report=true ONLY for novel, "
+    "confident, meaningful issues. When unsure whether something duplicates an "
+    "existing comment, prefer should_report=false. Silence beats noise."
 )
 
 
@@ -84,7 +126,13 @@ class ReviewOrchestrator:
     """Runs the model-driven, delegating review of a pull request."""
 
     # --- caps -------------------------------------------------------------
-    ORCHESTRATOR_MAX_ROUNDS = 12  # tool-calling rounds before forcing a finish
+    # Floor for orchestrator tool-calling rounds; scaled up with the file count
+    # in run() so large PRs get enough turns.
+    ORCHESTRATOR_MAX_ROUNDS = 12
+    # Two findings within this many lines (same file) count as duplicates. Kept
+    # tight so the guard catches exact re-posts without suppressing distinct
+    # nearby issues — semantic cross-bot dedup is the model's job (via the prompt).
+    NEAR_LINES = 3
 
     def __init__(self, llm_service):
         self.llm = llm_service
@@ -168,9 +216,12 @@ class ReviewOrchestrator:
         ]
         tools = build_orchestrator_tool_specs()
 
+        # Scale the round budget with the number of files so big PRs aren't cut
+        # off mid-review.
+        max_rounds = max(self.ORCHESTRATOR_MAX_ROUNDS, total_files + 8)
         finished = False
         rounds_used = 0
-        for round_num in range(1, self.ORCHESTRATOR_MAX_ROUNDS + 1):
+        for round_num in range(1, max_rounds + 1):
             rounds_used = round_num
             completion = await self.llm.raw_client.chat.completions.create(
                 model=self.llm.model,
@@ -263,7 +314,7 @@ class ReviewOrchestrator:
             logger.opt(colors=True).warning(
                 "<red>⚠ orchestrator hit the {}-round cap</red> — review may be "
                 "incomplete ({} file(s) delegated so far)",
-                self.ORCHESTRATOR_MAX_ROUNDS,
+                max_rounds,
                 len(delegated),
             )
 
@@ -282,8 +333,79 @@ class ReviewOrchestrator:
             len(direct),
             len(collected) + len(direct),
         )
-        all_issues = collected + direct
-        return self._group_by_file(all_issues)
+        kept = self._consolidate(collected + direct, existing_comments)
+        logger.opt(colors=True).success(
+            "<magenta>🧭 reporting {}</magenta> finding(s) after dedup", len(kept)
+        )
+        return self._group_by_file(kept)
+
+    def _consolidate(
+        self,
+        issues: List[Dict[str, Any]],
+        existing_comments: Optional[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        """Drop model-skipped findings and dedup against existing comments and
+        within this run. Logs every drop with its reason; returns the kept ones.
+
+        This is the deterministic guard: even if the model forgets to set
+        should_report=false, a finding that lands on (or within NEAR_LINES of) an
+        existing comment is dropped here.
+        """
+        existing = [
+            (c.get("path"), c.get("line") or c.get("original_line") or 0)
+            for c in (existing_comments or [])
+            if c.get("path")
+        ]
+        kept: List[Dict[str, Any]] = []
+        seen: List[tuple] = []
+        skipped: collections.Counter = collections.Counter()
+
+        for issue in issues:
+            file_path = issue.get("file", "?")
+            try:
+                line = int(issue.get("line") or 0)
+            except (TypeError, ValueError):
+                line = 0
+
+            reason = None
+            if issue.get("should_report") is False:
+                reason = issue.get("skip_reason") or "model_skip"
+            elif any(
+                p == file_path and abs((ln or 0) - line) <= self.NEAR_LINES
+                for p, ln in existing
+            ):
+                reason = "duplicate_existing"
+            elif any(
+                f == file_path and abs(ln - line) <= self.NEAR_LINES for f, ln in seen
+            ):
+                reason = "duplicate_in_run"
+
+            if reason:
+                skipped[reason] += 1
+                logger.opt(colors=True).info(
+                    "   <yellow>⊘ skip</yellow> {}:{} — <dim>{}</dim>",
+                    file_path,
+                    line,
+                    reason,
+                )
+                continue
+
+            seen.append((file_path, line))
+            kept.append(
+                {
+                    k: v
+                    for k, v in issue.items()
+                    if k not in ("should_report", "skip_reason")
+                }
+            )
+
+        if skipped:
+            logger.opt(colors=True).warning(
+                "<yellow>⊘ skipped {} finding(s)</yellow>: {}",
+                sum(skipped.values()),
+                dict(skipped),
+            )
+        return kept
 
     async def _final_findings(
         self, messages: List[Dict[str, Any]]
@@ -292,10 +414,15 @@ class ReviewOrchestrator:
             {
                 "role": "user",
                 "content": (
-                    "Report ONLY the issues you found directly (not those handled "
-                    "by sub-agents) as the structured list. Each issue needs file, "
-                    "type, severity, line, description, suggestion, production_impact."
-                    " If you found none yourself, return an empty list."
+                    "Output the issues you found directly (not those handled by "
+                    "sub-agents) as the structured list. For EACH issue set file, "
+                    "type, severity, line, description, suggestion, "
+                    "production_impact, should_report, and skip_reason. Set "
+                    "should_report=false (with skip_reason 'duplicate', "
+                    "'low_confidence', 'nitpick', or 'out_of_scope') for anything "
+                    "already covered by an existing comment, uncertain, trivial, or "
+                    "out of scope. If you found nothing yourself, return an empty "
+                    "list."
                 ),
             }
         ]

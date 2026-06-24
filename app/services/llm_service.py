@@ -89,6 +89,21 @@ class AIAnalysisIssue(BaseModel):
             "Written for a junior developer with no assumed context."
         ),
     )
+    should_report: bool = Field(
+        default=True,
+        description=(
+            "Whether to actually report this issue. Set false to skip duplicates "
+            "of existing comments, low-confidence guesses, nitpicks, or "
+            "out-of-scope items."
+        ),
+    )
+    skip_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "When should_report is false, one of: 'duplicate', 'low_confidence', "
+            "'nitpick', 'out_of_scope'."
+        ),
+    )
 
     @field_validator("type", mode="before")
     def validate_issue_type(cls, v):
@@ -180,15 +195,29 @@ class LLMService:
             A list of validated issues found in the changes.
         """
         system_prompt = (
-            "You are an expert senior code reviewer. You review the CHANGES "
-            "introduced by a pull request, not the whole file in isolation. "
-            "Before finalizing, you may call the available tools to gather "
-            "context: inspect the diffs of other changed files when a change here "
-            "affects or depends on them, and check the existing review comments so "
-            "you do not repeat feedback already given. Only report issues caused "
-            "or exposed by the changes in the diff. For every issue you MUST "
-            "populate: 'type', 'severity', 'line', 'description', 'suggestion', "
-            "and 'production_impact'."
+            "You are a focused code reviewer assigned to ONE file in a pull "
+            "request. Review its changes deeply and report only high-signal, "
+            "novel findings.\n\n"
+            "TOOLS (read-only context): get_existing_comments() — comments already "
+            "on this PR from humans and other review bots; list_changed_files(); "
+            "get_file_diff(path); search_code(query, path?); "
+            "read_file_range(path, start, end) (<=100 lines). Batch your tool calls "
+            "and stop once you have what you need.\n\n"
+            "WHAT TO REPORT: review the CHANGES (the diff) against the PR's intent. "
+            "Only report issues CAUSED or EXPOSED by the changes — not unrelated, "
+            "pre-existing code. Follow a changed symbol into other files when the "
+            "change affects them.\n\n"
+            "DEDUPLICATION & SIGNAL — for EVERY finding, check it against the "
+            "existing comments and set should_report=false with a skip_reason when "
+            "it is a 'duplicate' (the same or substantially similar issue is "
+            "already raised by an existing comment — yours from a prior run or "
+            "another bot like CodeRabbit/Copilot/Sourcery — even at a nearby line), "
+            "'low_confidence', a 'nitpick', or 'out_of_scope'. Set "
+            "should_report=true ONLY for novel, confident, meaningful issues. When "
+            "unsure whether it duplicates an existing comment, prefer "
+            "should_report=false. Silence beats noise.\n\n"
+            "For every issue populate: type, severity, line, description, "
+            "suggestion, production_impact, should_report, and skip_reason."
         )
         user_prompt = self._create_prompt(
             file_path, code_content, analysis_type, file_diff, pr_context
