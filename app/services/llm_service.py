@@ -31,6 +31,18 @@ from app.utils.language_detection import LanguageDetector
 DIFF_CONTEXT_LINES = 30
 
 
+def _context_window(model: str) -> int:
+    """Best-effort context-window size (tokens) for a model, for usage logging."""
+    m = (model or "").lower()
+    if "gpt-5" in m or "gpt-4.1" in m:
+        return 1_000_000
+    if "o3" in m or "o1" in m:
+        return 200_000
+    if "gpt-4o" in m or "gpt-4-turbo" in m:
+        return 128_000
+    return 128_000
+
+
 def _relevant_code_window(
     code_content: str,
     file_diff: Optional[str],
@@ -164,8 +176,24 @@ class LLMService:
         )
         self.client = instructor.from_openai(self.raw_client, mode=instructor.Mode.JSON)
         self.model = self.settings.llm.model
+        self.context_window = _context_window(self.model)
         logger.info(
             f"LLM Service initialized with model: {self.model} (base_url: {self.settings.llm.base_url})"
+        )
+
+    def _log_context(self, completion, indent: str = "") -> None:
+        """Log how much of the context window the latest call consumed."""
+        usage = getattr(completion, "usage", None)
+        if usage is None:
+            return
+        used = getattr(usage, "prompt_tokens", 0) or 0
+        pct = 100 * used / max(1, self.context_window)
+        logger.opt(colors=True).info(
+            "{}<dim>📊 context {:,}/{:,} tokens ({:.1f}%)</dim>",
+            indent,
+            used,
+            self.context_window,
+            pct,
         )
 
     async def analyze_code(
@@ -279,6 +307,7 @@ class LLMService:
                 max_completion_tokens=8192,
             )
             message = completion.choices[0].message
+            self._log_context(completion, "      ")
 
             if not message.tool_calls:
                 break  # the model is done gathering context

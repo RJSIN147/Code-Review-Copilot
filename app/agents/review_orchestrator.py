@@ -234,6 +234,7 @@ class ReviewOrchestrator:
                 max_completion_tokens=8192,
             )
             message = completion.choices[0].message
+            self.llm._log_context(completion, "   ")
             if not message.tool_calls:
                 logger.opt(colors=True).info(
                     "<magenta>🧭 round {}</magenta> — "
