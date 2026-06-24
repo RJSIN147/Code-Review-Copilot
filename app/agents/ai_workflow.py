@@ -82,6 +82,10 @@ class AIWorkflow:
         ``progress_callback`` is an optional async callable invoked as each file
         finishes analysis: ``await progress_callback(completed, total, file_path)``.
         """
+        logger.opt(colors=True).info(
+            "<cyan><bold>LangGraph flow:</bold></cyan> START → triage_pr → "
+            "<magenta>review_pr (orchestrator)</magenta> → synthesize_report → END"
+        )
         llm_service = LLMService()
 
         initial_state: AIAnalysisState = {

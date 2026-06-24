@@ -108,6 +108,13 @@ class ReviewOrchestrator:
         completed = 0
         collected: List[Dict[str, Any]] = []  # sub-agent issues (each carries file)
 
+        logger.opt(colors=True).info(
+            "<magenta><bold>🧭 ORCHESTRATOR</bold></magenta> reviewing "
+            "<cyan>{}</cyan> file(s): {}",
+            total_files,
+            ", ".join(files_by_path.keys()),
+        )
+
         async def delegate(file_path: str) -> str:
             """Run a sub-agent for one file; collect findings; return a summary."""
             nonlocal completed
@@ -121,9 +128,12 @@ class ReviewOrchestrator:
             sub_toolbox = ReviewToolbox(
                 files_data, existing_comments, current_file=file_path
             )
+            logger.opt(colors=True).info(
+                "   <magenta>⇨ DELEGATE</magenta> → sub-agent for <yellow>{}</yellow>",
+                file_path,
+            )
             try:
                 async with semaphore:
-                    logger.info(f"Orchestrator delegating sub-agent for {file_path}")
                     issues = await self.llm.analyze_code(
                         file_path,
                         file_data.get("content") or "",
@@ -154,7 +164,10 @@ class ReviewOrchestrator:
         ]
         tools = build_orchestrator_tool_specs()
 
-        for _ in range(self.ORCHESTRATOR_MAX_ROUNDS):
+        finished = False
+        rounds_used = 0
+        for round_num in range(1, self.ORCHESTRATOR_MAX_ROUNDS + 1):
+            rounds_used = round_num
             completion = await self.llm.raw_client.chat.completions.create(
                 model=self.llm.model,
                 messages=messages,
@@ -165,7 +178,22 @@ class ReviewOrchestrator:
             )
             message = completion.choices[0].message
             if not message.tool_calls:
+                logger.opt(colors=True).info(
+                    "<magenta>🧭 round {}</magenta> — "
+                    "<green>orchestrator finished (no more tools)</green>",
+                    round_num,
+                )
+                finished = True
                 break
+
+            tool_names = [tc.function.name for tc in message.tool_calls]
+            logger.opt(colors=True).info(
+                "<magenta>🧭 round {}</magenta> — model called <cyan>{}</cyan> "
+                "tool(s): <yellow>{}</yellow>",
+                round_num,
+                len(tool_names),
+                ", ".join(tool_names),
+            )
 
             messages.append(
                 {
@@ -199,7 +227,11 @@ class ReviewOrchestrator:
 
             results: Dict[str, str] = {}
             for tc in data_calls:
-                results[tc.id] = toolbox.execute(tc.function.name, self._parse_args(tc))
+                args = self._parse_args(tc)
+                logger.opt(colors=True).info(
+                    "   <blue>→ {}</blue>({})", tc.function.name, self._fmt_args(args)
+                )
+                results[tc.id] = toolbox.execute(tc.function.name, args)
             if spawn_calls:
                 spawn_outputs = await asyncio.gather(
                     *(
@@ -219,8 +251,29 @@ class ReviewOrchestrator:
                     }
                 )
 
+        if not finished:
+            logger.opt(colors=True).warning(
+                "<red>⚠ orchestrator hit the {}-round cap</red> — review may be "
+                "incomplete ({} file(s) delegated so far)",
+                self.ORCHESTRATOR_MAX_ROUNDS,
+                len(delegated),
+            )
+
+        logger.opt(colors=True).info(
+            "<magenta><bold>🧭 orchestrator done</bold></magenta> in {} round(s) — "
+            "<cyan>{}</cyan> delegated; synthesizing direct findings…",
+            rounds_used,
+            len(delegated),
+        )
         # Final pass: the orchestrator's own (non-delegated) findings.
         direct = await self._final_findings(messages)
+        logger.opt(colors=True).success(
+            "<magenta>🧭 findings</magenta>: <yellow>{}</yellow> from sub-agents + "
+            "<yellow>{}</yellow> direct = <cyan>{}</cyan> total",
+            len(collected),
+            len(direct),
+            len(collected) + len(direct),
+        )
         all_issues = collected + direct
         return self._group_by_file(all_issues)
 
@@ -258,6 +311,10 @@ class ReviewOrchestrator:
             return json.loads(tool_call.function.arguments or "{}")
         except json.JSONDecodeError:
             return {}
+
+    @staticmethod
+    def _fmt_args(args: Dict[str, Any]) -> str:
+        return ", ".join(f"{k}={v}" for k, v in args.items())
 
     @staticmethod
     def _build_manifest(

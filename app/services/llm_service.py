@@ -209,8 +209,11 @@ class LLMService:
             )
 
             validated_issues = [issue.model_dump() for issue in response.issues]
-            logger.info(
-                f"LLM analysis for {file_path} found {len(validated_issues)} issues."
+            logger.opt(colors=True).success(
+                "      <green>✓ sub-agent</green> <yellow>{}</yellow> finished — "
+                "<cyan>{}</cyan> issue(s)",
+                file_path,
+                len(validated_issues),
             )
             return validated_issues
 
@@ -233,7 +236,7 @@ class LLMService:
         """
         tools = build_tool_specs()
 
-        for _ in range(self.MAX_TOOL_ITERATIONS):
+        for round_num in range(1, self.MAX_TOOL_ITERATIONS + 1):
             completion = await self.raw_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -246,6 +249,15 @@ class LLMService:
 
             if not message.tool_calls:
                 break  # the model is done gathering context
+
+            sub_tool_names = [tc.function.name for tc in message.tool_calls]
+            logger.opt(colors=True).info(
+                "      <green>🔧 sub-agent</green> <yellow>{}</yellow> round {} — "
+                "called <cyan>{}</cyan>",
+                file_path,
+                round_num,
+                ", ".join(sub_tool_names),
+            )
 
             # Record the assistant's tool-call turn explicitly (portable across
             # providers), followed by the result of each requested tool call.
@@ -272,7 +284,11 @@ class LLMService:
                 except json.JSONDecodeError:
                     arguments = {}
                 result = toolbox.execute(tc.function.name, arguments)
-                logger.info(f"[{file_path}] tool call: {tc.function.name}({arguments})")
+                logger.opt(colors=True).info(
+                    "        <blue>↳ {}</blue>({})",
+                    tc.function.name,
+                    ", ".join(f"{k}={v}" for k, v in arguments.items()),
+                )
                 messages.append(
                     {
                         "role": "tool",
