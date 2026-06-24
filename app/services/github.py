@@ -7,7 +7,7 @@ import re
 import pickle
 import hashlib
 from datetime import datetime
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 
 from github import Github, GithubException, Auth
 from github.PullRequest import PullRequest
@@ -407,6 +407,56 @@ class GitHubService:
                 f"Failed to get PR metadata for #{pr_number}: {str(e)}",
                 details={"repo_url": repo_url, "pr_number": pr_number},
             )
+
+    def get_pull_request_comments(
+        self, repo_url: str, pr_number: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch existing comments on a pull request (GitHub API only, no cloning).
+
+        Combines inline review comments (anchored to a file/line) and the general
+        conversation comments. Used to give the reviewer agent awareness of what
+        has already been discussed so it can avoid repeating feedback.
+
+        Returns an empty list on failure — existing comments are bonus context,
+        not essential, so a failure here must not abort the analysis.
+        """
+        try:
+            pull_request = self.get_pull_request(repo_url, pr_number)
+            comments: List[Dict[str, Any]] = []
+
+            for c in pull_request.get_review_comments():
+                comments.append(
+                    {
+                        "kind": "inline",
+                        "author": c.user.login if c.user else "unknown",
+                        "path": c.path,
+                        "line": c.line or c.original_line,
+                        "body": c.body,
+                    }
+                )
+
+            for c in pull_request.get_issue_comments():
+                comments.append(
+                    {
+                        "kind": "conversation",
+                        "author": c.user.login if c.user else "unknown",
+                        "path": None,
+                        "line": None,
+                        "body": c.body,
+                    }
+                )
+
+            logger.info(
+                f"Fetched {len(comments)} existing comment(s) for PR #{pr_number}"
+            )
+            return comments
+
+        except Exception as e:
+            logger.warning(
+                f"Could not fetch existing comments for PR #{pr_number}: {e}"
+            )
+            return []
 
     def get_pull_request_files(self, repo_url: str, pr_number: int) -> Dict[str, Any]:
         """

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.agents.tools.ai_tools import analyze_code_with_ai
+from app.agents.tools.review_tools import ReviewToolbox
 from app.config.settings import get_settings
 from app.services.llm_service import LLMService
 from app.utils.language_detection import LanguageDetector
@@ -162,10 +163,27 @@ class AIWorkflow:
                 )
                 return None
 
+            pr_data = state["pr_data"]
+            # Give the model agentic access to the rest of the PR's context:
+            # other files' diffs and the existing review comments.
+            toolbox = ReviewToolbox(
+                files_data=state["files_data"],
+                existing_comments=pr_data.get("existing_comments"),
+                current_file=file_path,
+            )
+
             async with semaphore:
                 logger.info(f"AI is analyzing file: {file_path}")
                 issues = await analyze_code_with_ai(
-                    llm_service, file_path, file_data["content"]
+                    llm_service,
+                    file_path,
+                    file_data["content"],
+                    file_diff=file_data.get("patch"),
+                    pr_context={
+                        "title": pr_data.get("title"),
+                        "body": pr_data.get("body"),
+                    },
+                    toolbox=toolbox,
                 )
             return {"file_path": file_path, "issues": issues}
 
