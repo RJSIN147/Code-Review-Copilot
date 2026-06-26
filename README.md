@@ -41,7 +41,7 @@ graph TB
 
     subgraph "External Services"
         GitHub[GitHub API<br/>• PR Data<br/>• File Content<br/>• Metadata]
-        OpenAI[OpenAI/Pollinations<br/>• GPT Models<br/>• Code Analysis]
+        OpenAI[LLM Provider<br/>OpenAI-compatible API<br/>• Code Analysis]
     end
 
     subgraph "Data Layer"
@@ -213,7 +213,7 @@ never re-posts comments that already exist.**
 ### **AI & Analysis Engine**
 
 - **LangGraph** - Advanced AI workflow orchestration with state management
-- **OpenAI/Pollinations** - Multiple LLM provider support for code analysis
+- **OpenAI-compatible LLM API** - Provider-agnostic; ships pointed at OpenRouter. Set `base_url`/`model` in `config.toml`
 - **PyGithub** - Comprehensive GitHub API integration with rate limiting
 - **Instructor** - Structured LLM output validation with Pydantic models
 - **Custom Analysis Tools** - Specialized code analysis utilities and detectors
@@ -253,14 +253,14 @@ For the optional web UI:
 #### Optional
 
 - **GitHub Personal Access Token** ([Create here](https://github.com/settings/tokens)) - For private repositories and higher rate limits
-- **OpenAI API Key** ([Get yours here](https://platform.openai.com/api-keys)) - For using GPT instead of pollinations.ai
+- **LLM API Key** - An API key for any OpenAI-compatible provider. The default `config.toml` targets [OpenRouter](https://openrouter.ai); the key is read from `OPENAI_API_KEY`. Point `llm.base_url`/`llm.model` at OpenAI, a local server, etc. as desired
 
 ### 1. Clone & Environment Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/RJSIN147/Code-Review-Copilot
-cd code-review-agent
+cd Code-Review-Copilot
 
 # Install all dependencies with UV
 uv sync
@@ -518,6 +518,17 @@ curl -X DELETE "http://localhost:8000/api/v1/tasks/uuid-task-id" \
 curl "http://localhost:8000/api/v1/results/uuid-task-id"
 ```
 
+### Get Analysis Summary
+
+**GET** `/api/v1/results/{task_id}/summary`
+
+Returns just the summary metrics (severity/type counts and scores) for a task,
+without the per-file issue detail. Useful for dashboards and badges.
+
+```bash
+curl "http://localhost:8000/api/v1/results/uuid-task-id/summary"
+```
+
 ## 🎨 Frontend Development
 
 A React-based web UI is available in the `frontend/` directory for interactively submitting PRs, monitoring tasks, and viewing analysis results.
@@ -634,9 +645,9 @@ curl "https://code-review.spoo.me/api/v1/status/uuid-task-id"
 // In progress
 {
   "task_id": "uuid-task-id",
-  "status": "in_progress",
+  "status": "processing",
   "progress": 45.0,
-  "message": "Analyzing file: src/components/Dashboard.tsx"
+  "status_message": "Analyzed 4/9 files — Dashboard.tsx"
 }
 
 // Completed
@@ -710,7 +721,9 @@ curl "https://code-review.spoo.me/api/v1/results/uuid-task-id"
 #### Cancel Running Task
 
 ```bash
-curl -X POST "https://code-review.spoo.me/api/v1/cancel/uuid-task-id"
+curl -X DELETE "https://code-review.spoo.me/api/v1/tasks/uuid-task-id" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "User requested cancellation"}'
 ```
 
 #### Analyze Your Own PR
@@ -815,34 +828,32 @@ uv run alembic downgrade -1
 ## 📂 Project Structure
 
 ```bash
-code_reviewer_agent/
-├── app/                 # FastAPI backend
-│   ├── agents/          # AI workflow logic
-│   │   ├── ai_workflow.py
-│   │   ├── analyzer.py
-│   │   └── tools/       # Analysis tools
-│   ├── api/             # FastAPI routes
-│   │   └── v1/endpoints/
-│   ├── config/          # Configuration management
-│   ├── models/          # Database & API models
-│   ├── services/        # Business logic
-│   │   ├── github.py
-│   │   └── llm_service.py
-│   ├── tasks/           # Celery tasks
-│   └── utils/           # Utilities
-├── frontend/            # React + TypeScript web UI
-│   ├── scripts/         # API verification scripts
-│   ├── src/             # Components, hooks, types, API client
-│   ├── index.html
-│   └── package.json
-├── tests/               # Test suite
-│   ├── fixtures/        # Test fixtures
-│   ├── integration/     # Integration tests
-│   └── unit/           # Unit tests
-├── migrations/          # Database migrations
-├── Makefile            # Convenience commands (frontend-dev, etc.)
-└── docs/               # Documentation
+Code-Review-Copilot/
+├── app/                            # FastAPI backend
+│   ├── agents/                     # AI review engine
+│   │   ├── analyzer.py             # LangGraphAnalyzer — public entrypoint
+│   │   ├── ai_workflow.py          # LangGraph: triage → review → synthesize
+│   │   ├── review_orchestrator.py  # Orchestrator agent (delegates + dedups)
+│   │   └── tools/
+│   │       └── review_tools.py     # Read-only PR-data tools + tool specs
+│   ├── api/v1/endpoints/           # FastAPI routes (analyze, status)
+│   ├── config/                     # Settings (TOML + env) + DB manager
+│   ├── models/                     # SQLModel tables + Pydantic schemas
+│   ├── services/                   # github.py, github_review.py, llm_service.py
+│   ├── tasks/                      # Celery app + analyze_pr_task pipeline
+│   └── utils/                      # diff parser, language detection, logger, redis
+├── frontend/                       # React 19 + TypeScript + Vite + Tailwind v4
+│   ├── scripts/verify.sh           # API contract verification script
+│   └── src/                        # components, hooks (SWR), services, types
+├── tests/                          # unit + integration tests
+├── migrations/                     # Alembic database migrations
+├── docs/ARCHITECTURE.md            # Architecture & codebase map
+├── config.toml                     # Application configuration
+└── Makefile                        # Frontend convenience commands
 ```
+
+> See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for an implementation-accurate
+> deep dive into the review engine, the request lifecycle, and known drift/dead code.
 
 ## 🔍 Analysis Features
 
